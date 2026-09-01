@@ -23,7 +23,7 @@ The sample lesson and its transcript were written by The Agora LA and are includ
 5. Choose **Import, Analyze & Save**.
 6. Review the generated brief, transcript, questions, expected answers, and answer feedback.
 
-OpenRouter creates a user-controlled provider credential. It remains in the iPhone Keychain. AI requests go directly from the device to the authorized provider; The Agora does not operate a shared AI account for listeners. A reviewer who already has a regular OpenRouter API key may instead choose **I Already Have an API Key**, paste it, and choose **Verify & Connect**.
+OpenRouter creates a user-controlled provider credential stored in the iPhone Keychain. Long episode analysis runs as an Agora cloud job so it can continue after the app closes. The credential is encrypted before entering the queue, decrypted only in worker memory, and erased when the job completes or fails. Provider usage is still billed only to the reviewer-owned provider account; The Agora does not operate a shared AI account. A reviewer who already has a regular OpenRouter API key may instead choose **I Already Have an API Key**, paste it, and choose **Verify & Connect**.
 
 ## Third-Party Content
 

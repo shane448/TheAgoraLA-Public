@@ -95,7 +95,7 @@ struct PointsProgressView: View {
                 .font(AgoraTheme.cardTitleFont)
                 .foregroundColor(AgoraTheme.ink)
 
-            ForEach(PointsStore.levels.reversed()) { level in
+            ForEach(PointsStore.levels) { level in
                 levelRow(level)
             }
         }

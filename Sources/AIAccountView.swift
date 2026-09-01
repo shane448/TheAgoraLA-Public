@@ -374,7 +374,7 @@ struct AIAccountView: View {
                 Label("Secure and Listener-Controlled", systemImage: "lock.shield.fill")
                     .font(AgoraTheme.cardTitleFont)
                     .foregroundColor(AgoraTheme.ink)
-                Text("The provider credential stays in the iPhone Keychain. The app sends podcast material directly to the provider you authorize only when you request an AI feature.")
+                Text("The provider credential stays in the iPhone Keychain. For cloud analysis, an encrypted temporary copy and the selected podcast material are sent to The Agora's secure job service, used only for that request, and erased when the job finishes.")
                     .font(AgoraTheme.bodyFont)
                     .foregroundColor(AgoraTheme.inkMuted)
 

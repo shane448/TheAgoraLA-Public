@@ -11,9 +11,9 @@ Audit date: August 9, 2026
 - Public website build, lint, and all five route tests passed.
 - Privacy, Terms, Support, home, and OpenRouter callback URLs returned HTTP 200.
 - Production dependency audits reported zero known vulnerabilities for the site
-  and the legacy server.
-- Legacy server build and all four server tests passed. The server remains
-  excluded from the version 1.0 app architecture and must not be deployed.
+  and cloud service.
+- Cloud service build, security checks, and automated tests passed. The service
+  uses listener-owned provider credentials and seven-day job retention.
 
 ## Release Repairs Included
 

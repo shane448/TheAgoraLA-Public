@@ -25,10 +25,10 @@ export default function SupportPage() {
 
       <h2>Import an episode</h2>
       <p>
-        Open Episode Setup and paste an Apple Podcasts link, public RSS feed, or
-        direct HTTPS audio link. Choose <strong>Import &amp; Save Details</strong>
-        to save the episode title, playable audio, and available publisher
-        summary without connecting AI.
+        Open Episode Setup and paste an episode or show link from Apple Podcasts,
+        Spotify, another major podcast app, a public RSS feed, or a direct HTTPS
+        audio link. Choose <strong>Import, Analyze &amp; Save</strong> to replace the
+        current episode and prepare everything in one step.
       </p>
       <p>
         An Apple Podcasts episode link imports that episode when Apple includes
@@ -38,10 +38,11 @@ export default function SupportPage() {
 
       <h2>Create the transcript and questions</h2>
       <p>
-        Connect an AI provider account you control, choose the number of prompts,
-        then select <strong>Analyze Full Podcast &amp; Generate Prompts</strong>.
-        Agora prefers a publisher-provided transcript. When none is available,
-        accessible episode audio is transcribed through your authorized provider.
+        Connect an AI provider account you control, choose automatic or manual
+        prompt count, then select <strong>Import, Analyze &amp; Save</strong>. Agora
+        prefers a publisher-provided transcript. When none is available,
+        accessible episode audio is transcribed in the secure cloud job using
+        your authorized provider.
       </p>
       <p>
         The complete transcript is analyzed before questions are selected. Open
@@ -98,7 +99,7 @@ export default function SupportPage() {
       <h2>Before contacting support</h2>
       <ul>
         <li>Confirm the podcast page and episode audio are publicly accessible.</li>
-        <li>Keep Agora open while a new episode is being analyzed.</li>
+        <li>You may leave Agora after it confirms that cloud analysis is running; reopen Episode Setup later to collect the result.</li>
         <li>Try the same episode again after a temporary provider or network error.</li>
         <li>
           Include the podcast URL, device model, iOS version, and exact error

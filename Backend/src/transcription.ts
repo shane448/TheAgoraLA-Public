@@ -47,6 +47,11 @@ async function downloadPublicAudio(input: string, directory: string, maxBytes: n
       continue;
     }
     if (!response.ok) throw new Error(`The audio host returned HTTP ${response.status}.`);
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (contentType.includes("text/html") || contentType.includes("application/json")
+      || contentType.includes("mpegurl") || url.pathname.toLowerCase().endsWith(".m3u8")) {
+      throw new Error("The podcast link did not resolve to a downloadable audio file.");
+    }
     const statedLength = Number(response.headers.get("content-length") ?? 0);
     if (statedLength > maxBytes) throw new Error("This podcast audio file is larger than the server limit.");
     const suffix = safeExtension(url.pathname);
@@ -89,16 +94,19 @@ async function assertPublicHTTPSURL(url: URL): Promise<void> {
   }
 }
 
-function isPrivateAddress(address: string): boolean {
+export function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateAddress(normalized.slice("::ffff:".length));
+  }
   if (isIP(address) === 4) {
     const [a = 0, b = 0] = address.split(".").map(Number);
     return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254)
       || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
       || (a === 100 && b >= 64 && b <= 127) || a >= 224;
   }
-  const normalized = address.toLowerCase();
   return normalized === "::1" || normalized === "::" || normalized.startsWith("fc")
-    || normalized.startsWith("fd") || normalized.startsWith("fe80:") || normalized.startsWith("::ffff:127.");
+    || normalized.startsWith("fd") || normalized.startsWith("fe80:") || normalized.startsWith("ff");
 }
 
 function safeExtension(path: string): string {

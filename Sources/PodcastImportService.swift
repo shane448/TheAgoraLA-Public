@@ -284,18 +284,46 @@ struct PodcastImportService {
     }
 
     private func bestCatalogMatch(in results: [AppleLookupItem], title: String) -> AppleLookupItem? {
-        let target = Set(normalizedKey(title).split(separator: " ").map(String.init))
+        let normalizedTitle = normalizedKey(title)
+        let target = catalogTokens(normalizedTitle)
         guard !target.isEmpty else { return results.first }
-        return results.max { left, right in
+        let ranked = results.max { left, right in
             catalogScore(left, target: target) < catalogScore(right, target: target)
         }
+        guard let ranked else { return nil }
+
+        // One-word show names such as "Overthink" must match exactly. Without this
+        // guard, Apple's fuzzy search can silently substitute a different podcast.
+        if target.count == 1 {
+            let exactValues = [ranked.trackName, ranked.collectionName]
+                .compactMap { $0 }
+                .map(normalizedKey)
+            return exactValues.contains(normalizedTitle) ? ranked : nil
+        }
+
+        return catalogScore(ranked, target: target) >= 0.58 ? ranked : nil
     }
 
     private func catalogScore(_ item: AppleLookupItem, target: Set<String>) -> Double {
         let value = [item.trackName, item.collectionName].compactMap { $0 }.joined(separator: " ")
-        let candidate = Set(normalizedKey(value).split(separator: " ").map(String.init))
+        let candidate = catalogTokens(value)
         guard !candidate.isEmpty else { return 0 }
-        return Double(target.intersection(candidate).count) / Double(target.union(candidate).count)
+        let intersection = target.intersection(candidate)
+        let targetCoverage = Double(intersection.count) / Double(target.count)
+        let jaccard = Double(intersection.count) / Double(target.union(candidate).count)
+        return (targetCoverage * 0.75) + (jaccard * 0.25)
+    }
+
+    private func catalogTokens(_ value: String) -> Set<String> {
+        let ignored: Set<String> = [
+            "and", "for", "from", "official", "podcast", "show", "the", "with"
+        ]
+        return Set(
+            normalizedKey(value)
+                .split(separator: " ")
+                .map(String.init)
+                .filter { $0.count >= 2 && !ignored.contains($0) }
+        )
     }
 
     private func firstHTMLValue(in html: String, names: [String], fallbackPattern: String? = nil) -> String? {

@@ -9,7 +9,7 @@ In App Store Connect, select that the app and its third-party AI provider collec
 | Audio Data | Yes | No | App Functionality |
 | Other Diagnostic Data | Yes | No | App Functionality |
 
-Other User Content includes submitted podcast links, transcripts, generated study material, and typed listener answers. Audio Data includes episode audio processed for transcription and spoken answers when that feature is used. User ID refers only to the listener's separately authorized AI-provider account; The Agora does not create a listener account or receive the provider's email address.
+Other User Content includes submitted podcast links, transcripts, generated study material, and typed listener answers. Audio Data includes episode audio processed for transcription and spoken answers when that feature is used. User ID includes the separately authorized AI-provider account and a pseudonymous installation identifier used by the Agora cloud service to return only that device's jobs. The Agora does not receive the provider's email address.
 
 The app does not use data for third-party advertising, developer advertising, or cross-company tracking. It does not collect purchase history, email addresses, precise location, contacts, browsing history, health, fitness, or payment-card information. The Agora does not sell credits or receive AI payments.
 

@@ -95,9 +95,10 @@ export default function Home() {
               between the listener and the provider.
             </p>
             <p>
-              Provider credentials stay in the iPhone Keychain. The Agora does
-              not receive a payment share or operate an AI billing account for
-              listeners.
+              Provider credentials stay in the iPhone Keychain. When cloud
+              analysis is requested, an encrypted temporary copy powers that
+              listener&apos;s job and is erased when it finishes. The Agora does not
+              receive a payment share or operate an AI billing account.
             </p>
             <Link className="text-link light-link" href="/privacy">
               Read our privacy policy

@@ -6,6 +6,7 @@ This service runs long podcast transcription and prompt generation outside the i
 
 - Each request uses the listener's OpenRouter credential. The Agora does not provide or pay for AI usage.
 - Credentials are encrypted with AES-256-GCM before entering PostgreSQL, decrypted only in worker memory, and erased when a job completes or fails.
+- Completed and failed cloud-job records, including transcripts and generated study material, are automatically deleted after `JOB_RETENTION_DAYS` (seven days by default).
 - The API never returns provider credentials and Fastify request-body logging is not enabled.
 - Anonymous installation sessions avoid requiring an Agora account or Sign in with Apple.
 

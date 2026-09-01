@@ -14,6 +14,7 @@ final class NowPlayingManager {
     var pauseHandler: (() -> Void)?
     var skipForwardHandler: (() -> Void)?
     var skipBackwardHandler: (() -> Void)?
+    var seekHandler: ((Double) -> Void)?
 
     func configure(title: String, duration: Double) {
         nowPlayingInfo[MPMediaItemPropertyTitle] = title
@@ -38,31 +39,40 @@ final class NowPlayingManager {
         commandCenter.togglePlayPauseCommand.isEnabled = true
         commandCenter.skipForwardCommand.isEnabled = true
         commandCenter.skipBackwardCommand.isEnabled = true
+        commandCenter.changePlaybackPositionCommand.isEnabled = true
         commandCenter.skipForwardCommand.preferredIntervals = [15]
         commandCenter.skipBackwardCommand.preferredIntervals = [15]
 
         commandCenter.playCommand.addTarget { [weak self] _ in
-            self?.playHandler?()
+            DispatchQueue.main.async { self?.playHandler?() }
             return .success
         }
         commandCenter.pauseCommand.addTarget { [weak self] _ in
-            self?.pauseHandler?()
+            DispatchQueue.main.async { self?.pauseHandler?() }
             return .success
         }
         commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
-            if let rate = self?.infoCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double, rate > 0 {
-                self?.pauseHandler?()
-            } else {
-                self?.playHandler?()
+            DispatchQueue.main.async {
+                if let rate = self?.infoCenter.nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double,
+                   rate > 0 {
+                    self?.pauseHandler?()
+                } else {
+                    self?.playHandler?()
+                }
             }
             return .success
         }
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-            self?.skipForwardHandler?()
+            DispatchQueue.main.async { self?.skipForwardHandler?() }
             return .success
         }
         commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-            self?.skipBackwardHandler?()
+            DispatchQueue.main.async { self?.skipBackwardHandler?() }
+            return .success
+        }
+        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            DispatchQueue.main.async { self?.seekHandler?(event.positionTime) }
             return .success
         }
     }

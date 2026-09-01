@@ -116,6 +116,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         nowPlaying.pauseHandler = { [weak self] in self?.audioManager.pause() }
         nowPlaying.skipForwardHandler = { [weak self] in self?.skip(by: 15) }
         nowPlaying.skipBackwardHandler = { [weak self] in self?.skip(by: -15) }
+        nowPlaying.seekHandler = { [weak self] position in self?.seek(to: position) }
 
         audioManager.$currentTime
             .receive(on: RunLoop.main)

@@ -30,7 +30,7 @@
 - Test the offline sample lesson, full transcript, answer scoring, feedback, and Agora Points without an AI account.
 - Test Apple Podcasts show links, episode links, direct RSS links, published transcripts, and direct audio links.
 - Test one short, one 60-minute, and one 2-hour episode with a listener-owned provider account.
-- Confirm podcast audio, transcripts, and answers are sent only to the provider authorized by the listener.
+- Confirm podcast audio and transcripts pass through the encrypted Agora cloud job only to the provider authorized by the listener, credentials are erased at job completion, and cloud job records expire within seven days.
 - Archive with a distribution certificate, validate the archive, upload it, install through TestFlight, and repeat the critical path.
 
 ## Operational Review

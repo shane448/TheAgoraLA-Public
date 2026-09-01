@@ -1,6 +1,6 @@
 # AI Provider Contract
 
-Version 1.0 does not use an Agora-operated AI backend, Agora accounts, StoreKit, subscriptions, or Agora-issued credits. The listener authorizes an AI provider account and any provider charges remain directly between that listener and the provider.
+Version 1.0 uses an Agora-operated cloud job service for long-running episode transcription and analysis. It does not use StoreKit, subscriptions, paid features, or Agora-issued AI credits. The listener authorizes an AI provider account and any provider charges remain directly between that listener and the provider.
 
 ## Account Connection
 
@@ -12,7 +12,7 @@ The app uses OpenRouter OAuth with PKCE:
 4. Store the resulting provider key in the iPhone Keychain with `ThisDeviceOnly` protection.
 5. Delete the Keychain item immediately when the listener disconnects.
 
-For listeners who already have an OpenRouter key, the app also offers a clearly labeled manual paste-and-verify path. Whether created through authorization or pasted manually, the key stays in the iPhone Keychain and is never sent to The Agora.
+For listeners who already have an OpenRouter key, the app also offers a clearly labeled manual paste-and-verify path. Whether created through authorization or pasted manually, the key is stored in the iPhone Keychain. For cloud analysis, an encrypted temporary copy is sent to the Agora job service, decrypted only in worker memory, and erased from the job when it completes or fails.
 
 ## Provider Requests
 
@@ -21,7 +21,7 @@ For listeners who already have an OpenRouter key, the app also offers a clearly 
 - Authentication: `Authorization: Bearer <listener-owned-provider-key>`
 - Attribution: the public app website URL in `AppLinks.home` and `X-OpenRouter-Title: The Agora LA`
 
-Podcast audio, transcripts, generated questions, expected answers, and listener answers are sent directly from the app to the authorized provider only when the listener invokes the corresponding feature.
+Podcast audio or transcripts used for long episode analysis travel through the Agora cloud job service to the authorized provider. Completed job records are retained for no more than seven days so an interrupted app session can recover its result. Listener answers are graded directly from the app through the authorized provider and are not stored by the Agora cloud service.
 
 ## Episode Analysis
 
@@ -53,4 +53,4 @@ The provider grades semantic meaning rather than exact wording, credits correct 
 
 The built-in sample lesson is original content and requires no account, provider, purchase, or network service. It demonstrates the episode brief, full transcript, prompt, answer entry, scoring feedback, supported answer, and Agora Points flow.
 
-The legacy development server under `Backend/` is not linked into the iOS target and must not be deployed for version 1.0. Only its static privacy, terms, and support pages are publication inputs.
+The production service under `Backend/` must be deployed with PostgreSQL, FFmpeg, TLS, encrypted provider-credential storage, and seven-day job retention. The iOS target's `AGORA_API_BASE_URL` must point to that production origin.

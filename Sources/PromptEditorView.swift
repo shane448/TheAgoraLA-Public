@@ -713,7 +713,7 @@ struct PromptEditorView: View {
             return "Enter the timestamp in seconds."
         }
         guard timestamp >= 1, timestamp <= promptEditorDurationSeconds else {
-            return "Choose a timestamp between 1 second and (Int(promptEditorDurationSeconds)) seconds."
+            return "Choose a timestamp between 1 second and \(Int(promptEditorDurationSeconds)) seconds."
         }
         guard !newQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Enter the question to ask the listener."

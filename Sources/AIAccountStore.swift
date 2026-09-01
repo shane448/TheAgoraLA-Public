@@ -43,11 +43,14 @@ enum AIAccountError: LocalizedError {
     case managementAPIKey
     case signInRejected(String)
     case keychainFailure
+    case secureRandomUnavailable
 
     var errorDescription: String? {
         switch self {
         case .couldNotStartSignIn:
             return "The AI sign-in window could not be opened."
+        case .secureRandomUnavailable:
+            return "The AI sign-in could not be started securely on this device. Please try again."
         case .invalidCallback:
             return "The AI sign-in did not return a valid authorization."
         case .invalidAPIKey:
@@ -82,7 +85,7 @@ final class AIAccountStore: NSObject, ObservableObject {
     }
 
     func connect() async throws {
-        let verifier = Self.randomVerifier()
+        let verifier = try Self.randomVerifier()
         let challenge = Self.codeChallenge(for: verifier)
         var components = URLComponents(string: "https://openrouter.ai/auth")
         components?.queryItems = [
@@ -234,9 +237,11 @@ final class AIAccountStore: NSObject, ObservableObject {
         return key
     }
 
-    private nonisolated static func randomVerifier() -> String {
+    private nonisolated static func randomVerifier() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 48)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw AIAccountError.secureRandomUnavailable
+        }
         return Data(bytes).base64URLEncodedString()
     }
 

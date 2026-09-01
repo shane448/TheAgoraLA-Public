@@ -82,6 +82,8 @@ final class AudioPlayerManager: ObservableObject {
         // Observe buffering state
         bufferEmptyObserver = item.observe(\.isPlaybackBufferEmpty, options: [.new]) { [weak self] _, change in
             guard let self else { return }
+            let bufferEmpty = change.newValue ?? false
+            guard bufferEmpty else { return }
             DispatchQueue.main.async { self.isBuffering = true }
         }
         likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] _, change in
@@ -189,7 +191,7 @@ final class AudioPlayerManager: ObservableObject {
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             currentTime = time.seconds
-            if let durationSeconds = player.currentItem?.duration.seconds, durationSeconds.isFinite {
+            if let durationSeconds = self.player?.currentItem?.duration.seconds, durationSeconds.isFinite {
                 if duration != durationSeconds {
                     duration = durationSeconds
                     NotificationCenter.default.post(name: .audioDurationUpdated, object: nil, userInfo: ["duration": durationSeconds])

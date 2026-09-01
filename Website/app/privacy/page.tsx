@@ -11,9 +11,9 @@ export default function PrivacyPage() {
     <LegalPage
       eyebrow="Your information"
       title="Privacy Policy"
-      updated="Effective August 1, 2026"
+      updated="Effective August 31, 2026"
       asideTitle="The short version"
-      asideText="The Agora does not sell personal information, run advertising, or receive AI-provider credentials on an Agora server."
+      asideText="The Agora does not sell personal information or run advertising. Cloud analysis uses an encrypted, short-lived provider credential only for the job you request."
     >
       <h2>What this policy covers</h2>
       <p>
@@ -31,8 +31,9 @@ export default function PrivacyPage() {
         </li>
         <li>
           An AI-provider credential created after you authorize a provider
-          account. The credential is stored in the iPhone Keychain and is not
-          sent to an Agora server.
+          account. The credential is stored in the iPhone Keychain. When you
+          request cloud analysis, an encrypted temporary copy is sent to the
+          Agora job service and erased after that job completes or fails.
         </li>
         <li>
           App preferences, saved episode material, generated questions,
@@ -50,11 +51,13 @@ export default function PrivacyPage() {
 
       <h2>AI and service providers</h2>
       <p>
-        When you request an AI feature, the app sends the podcast material and
-        listener answer needed for that feature directly to OpenRouter using
-        the provider access you authorized. OpenRouter and any model provider it
-        routes to process data under their own terms and privacy policies. Agora
-        does not receive or store your provider credential on its servers.
+        When you request cloud episode analysis, the app sends the episode title,
+        public audio link or transcript, selected settings, and an encrypted
+        temporary provider credential to Agora&apos;s cloud job service. The service
+        decrypts the credential only in worker memory, sends the material needed
+        for the job to OpenRouter and its routed model provider, then erases the
+        credential when the job completes or fails. Answer grading is sent from
+        the app to OpenRouter using the provider access you authorized.
       </p>
       <p>
         The Agora does not sell AI credits, collect payments, or receive a share
@@ -66,9 +69,12 @@ export default function PrivacyPage() {
       <p>
         Saved episodes, transcripts, generated study material, answers, and
         Agora Points remain on your device until you replace them or delete the
-        app and its data. Disconnecting your AI account removes the provider
-        credential from the iPhone Keychain. The AI provider may retain
-        information according to its own policy.
+        app and its data. Cloud job records, including transcripts and generated
+        study material, are automatically deleted within seven days. A
+        pseudonymous installation identifier remains so the app can securely
+        retrieve its own jobs. Disconnecting AI removes the Keychain credential.
+        OpenRouter and routed model providers may retain information under their
+        own policies.
       </p>
 
       <h2>Security</h2>

@@ -1,13 +1,11 @@
 import { loadConfig } from "./config.js";
 import { createDatabase } from "./database.js";
-import { AgoraOpenAI } from "./openAIClient.js";
 import { buildApp } from "./app.js";
 import { startAnalysisWorker } from "./worker.js";
 
 const config = loadConfig();
 const database = createDatabase(config);
-const openAI = new AgoraOpenAI(config);
-const app = buildApp({ config, database, openAI });
+const app = buildApp({ config, database });
 const stopWorker = startAnalysisWorker(database, config);
 
 const shutdown = async () => {

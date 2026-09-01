@@ -14,7 +14,7 @@ import {
   exchangeAppleAuthorizationCode,
   revokeAppleRefreshToken,
 } from "./appleOAuth.js";
-import type { AgoraOpenAI } from "./openAIClient.js";
+import { AgoraOpenAI } from "./openAIClient.js";
 import { encryptProviderCredential } from "./providerCredential.js";
 
 const appleSignInSchema = z.object({
@@ -39,9 +39,11 @@ const scoreSchema = z.object({
   question: z.string().min(5).max(500),
   expected_answer: z.string().min(5).max(4_000),
   user_answer: z.string().min(1).max(4_000),
+  provider_api_key: z.string().trim().startsWith("sk-or-").max(500),
 });
 
 const publicDirectory = new URL("../public/", import.meta.url);
+const analysisPipelineVersion = "2026-08-31.2";
 
 interface AnalysisJobRow {
   id: string;
@@ -52,8 +54,8 @@ interface AnalysisJobRow {
   completed_at: Date | null;
 }
 
-export function buildApp(options: { config: AppConfig; database: Database; openAI: AgoraOpenAI }) {
-  const { config, database, openAI } = options;
+export function buildApp(options: { config: AppConfig; database: Database }) {
+  const { config, database } = options;
   const app = Fastify({ logger: true, bodyLimit: 2_500_000, trustProxy: true });
 
   void app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
@@ -259,8 +261,11 @@ export function buildApp(options: { config: AppConfig; database: Database; openA
     const parsed = analysisJobSchema.parse(request.body);
     const { provider_api_key: providerAPIKey, ...input } = parsed;
     const sourceHash = createHash("sha256").update(JSON.stringify({
+      pipeline_version: analysisPipelineVersion,
+      title: input.title?.replace(/\s+/g, " ").trim() ?? null,
       audio_url: input.audio_url ?? null,
       transcript: input.transcript?.replace(/\s+/g, " ").trim() ?? null,
+      duration: input.duration ?? null,
       prompt_count: input.prompt_count,
       model: input.model ?? null,
     })).digest("hex");
@@ -335,7 +340,8 @@ export function buildApp(options: { config: AppConfig; database: Database; openA
     if (Number(dailyUsage.rows[0]?.count ?? 0) >= config.dailyScoreLimit) {
       throw statusError(429, "You reached today's answer-feedback limit. Please try again later.");
     }
-    const response = await openAI.structured<{ score: number; feedback: string }>({
+    const listenerAI = new AgoraOpenAI(config, body.provider_api_key, "https://openrouter.ai/api/v1");
+    const response = await listenerAI.structured<{ score: number; feedback: string }>({
       model: config.models.scoring,
       safetyID: createHash("sha256").update(session.userID).digest("hex"),
       effort: "low",
