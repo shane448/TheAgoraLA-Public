@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showEditor = false
     @State private var showTranscript = false
     @State private var showAIAccount = false
+    @State private var showPlaybackSettings = false
     @State private var isSummaryExpanded = false
 
     var body: some View {
@@ -74,6 +75,9 @@ struct ContentView: View {
                 AIAccountView()
                     .environmentObject(aiAccount)
             }
+            .sheet(isPresented: $showPlaybackSettings) {
+                PlaybackSettingsView(viewModel: viewModel)
+            }
             .onAppear {
                 viewModel.updateEpisode(episodeStore.episode)
             }
@@ -108,9 +112,22 @@ struct ContentView: View {
             Text("THE AGORA LA")
                 .font(AgoraTheme.titleFont)
                 .foregroundColor(AgoraTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .layoutPriority(1)
 
-            AgoraTag(text: "Interactive")
             Spacer()
+            Button {
+                showPlaybackSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(AgoraTheme.accent)
+                    .frame(width: 42, height: 42)
+                    .background(Circle().fill(AgoraTheme.cardSurface))
+            }
+            .accessibilityLabel("Playback settings")
+
             Button {
                 showAIAccount = true
             } label: {

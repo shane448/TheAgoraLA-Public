@@ -10,6 +10,7 @@ struct PlayerView: View {
     @Environment(\.openURL) private var openURL
     @State private var scrubPosition = 0.0
     @State private var isScrubbing = false
+    @State private var showHandsFreePermissionAlert = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -113,153 +114,29 @@ struct PlayerView: View {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Interactive Mode")
-                            .font(AgoraTheme.cardTitleFont)
-                            .foregroundColor(AgoraTheme.ink)
-                        Text("AI prompts pause the audio for reflection.")
-                            .font(AgoraTheme.tagFont)
-                            .foregroundColor(AgoraTheme.inkMuted)
-                    }
-
-                    Toggle(
-                        "Interactive Prompts",
-                        isOn: Binding(
-                            get: { viewModel.interactiveModeEnabled },
-                            set: { viewModel.setInteractiveMode($0) }
-                        )
-                    )
-                        .font(AgoraTheme.bodyFont)
-                        .foregroundColor(AgoraTheme.ink)
-                        .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
-
                     Divider()
 
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(spacing: 12) {
                         Image(systemName: "waveform.and.mic")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(AgoraTheme.accent)
                             .frame(width: 30)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Toggle(
-                                "Complete Hands-Free",
-                                isOn: Binding(
-                                    get: { viewModel.drivingModeEnabled },
-                                    set: { viewModel.setHandsFreeMode($0) }
-                                )
-                            )
+                        Text("Complete Hands-Free")
                             .font(AgoraTheme.bodyFont)
                             .foregroundColor(AgoraTheme.ink)
-                            .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+                        Spacer(minLength: 8)
 
-                            Text("Prompts are read aloud. Speak your answer, then hear your score and corrections automatically.")
-                                .font(AgoraTheme.tagFont)
-                                .foregroundColor(AgoraTheme.inkMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Text("Voice controls: \"Repeat the question,\" \"Start over,\" or \"Skip this question.\"")
-                                .font(AgoraTheme.tagFont)
-                                .foregroundColor(AgoraTheme.inkMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            if let selectedVoice = selectedNarrationVoice {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Narrator")
-                                        .font(AgoraTheme.tagFont.weight(.bold))
-                                        .foregroundColor(AgoraTheme.ink)
-
-                                    Menu {
-                                        ForEach(viewModel.narrationVoiceOptions) { option in
-                                            Button {
-                                                viewModel.selectedNarrationVoiceID = option.id
-                                            } label: {
-                                                if option.id == viewModel.selectedNarrationVoiceID {
-                                                    Label(option.name, systemImage: "checkmark")
-                                                } else {
-                                                    Text(option.name)
-                                                }
-                                            }
-                                        }
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Text(selectedVoice.name)
-                                                .font(AgoraTheme.bodyFont.weight(.semibold))
-                                                .foregroundColor(AgoraTheme.ink)
-                                                .lineLimit(1)
-                                                .minimumScaleFactor(0.85)
-                                            Spacer(minLength: 8)
-                                            Image(systemName: "chevron.up.chevron.down")
-                                                .font(.system(size: 11, weight: .bold))
-                                                .foregroundColor(AgoraTheme.accent)
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 10)
-                                        .frame(maxWidth: .infinity)
-                                        .background(Color.white.opacity(0.68))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(AgoraTheme.cardStroke, lineWidth: 1)
-                                        )
-                                        .cornerRadius(12)
-                                    }
-                                    .accessibilityLabel("Narrator voice")
-                                    .accessibilityValue(selectedVoice.name)
-
-                                    Text(selectedVoice.detail)
-                                        .font(AgoraTheme.tagFont)
-                                        .foregroundColor(AgoraTheme.inkMuted)
-                                        .fixedSize(horizontal: false, vertical: true)
-
-                                    HStack(spacing: 16) {
-                                        Button {
-                                            viewModel.previewNarrationVoice()
-                                        } label: {
-                                            Label("Preview Voice", systemImage: "speaker.wave.2.fill")
-                                        }
-                                        .disabled(viewModel.drivingPromptState != .idle)
-                                        .accessibilityHint("Plays a short sample using the selected narrator")
-
-                                        if viewModel.selectedNarrationVoiceID != NarrationVoiceOption.automaticID {
-                                            Button("Use Best Available") {
-                                                viewModel.selectedNarrationVoiceID = NarrationVoiceOption.automaticID
-                                            }
-                                            .accessibilityHint("Automatically selects the highest-quality installed voice")
-                                        }
-                                    }
-                                    .font(AgoraTheme.tagFont.weight(.semibold))
-                                    .foregroundColor(AgoraTheme.accent)
-                                }
-                            }
-
-                            #if targetEnvironment(simulator)
-                            Text("Testing on Mac: in Simulator, choose I/O > Audio Input > Mac microphone.")
-                                .font(AgoraTheme.tagFont)
-                                .foregroundColor(AgoraTheme.accent)
-                                .fixedSize(horizontal: false, vertical: true)
-                            #endif
-
-                            if !viewModel.drivingStatusText.isEmpty {
-                                Text(viewModel.drivingStatusText)
-                                    .font(AgoraTheme.tagFont)
-                                    .foregroundColor(
-                                        viewModel.drivingModeEnabled ? AgoraTheme.accent : .red
-                                    )
-                            }
-
-                            if viewModel.handsFreeNeedsSettings {
-                                #if canImport(UIKit)
-                                Button("Open Privacy Settings") {
-                                    guard let settingsURL = URL(
-                                        string: UIApplication.openSettingsURLString
-                                    ) else { return }
-                                    openURL(settingsURL)
-                                }
-                                .buttonStyle(AgoraOutlineButtonStyle())
-                                .accessibilityHint("Opens microphone and speech permissions for The Agora LA")
-                                #endif
-                            }
-                        }
+                        Toggle(
+                            "Complete Hands-Free",
+                            isOn: Binding(
+                                get: { viewModel.drivingModeEnabled },
+                                set: { viewModel.setHandsFreeMode($0) }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+                        .accessibilityLabel("Complete Hands-Free")
                     }
                 }
             }
@@ -292,6 +169,20 @@ struct PlayerView: View {
             @unknown default:
                 break
             }
+        }
+        .onChange(of: viewModel.handsFreeNeedsSettings) { needsSettings in
+            showHandsFreePermissionAlert = needsSettings
+        }
+        .alert("Hands-Free Needs Permission", isPresented: $showHandsFreePermissionAlert) {
+            #if canImport(UIKit)
+            Button("Open Settings") {
+                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                openURL(settingsURL)
+            }
+            #endif
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Allow Microphone and Speech Recognition access to use Complete Hands-Free.")
         }
     }
 
@@ -363,6 +254,185 @@ struct PlayerView: View {
         let minutes = intSeconds / 60
         let remainingSeconds = intSeconds % 60
         return String(format: "%d:%02d", minutes, remainingSeconds)
+    }
+
+}
+
+struct PlaybackSettingsView: View {
+    @ObservedObject var viewModel: PlayerViewModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                AgoraBackgroundView()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        interactiveSettings
+                        handsFreeSettings
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
+                }
+            }
+            .navigationTitle("Playback Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(AgoraTheme.accent)
+                }
+            }
+        }
+    }
+
+    private var interactiveSettings: some View {
+        AgoraCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Interactive Prompts")
+                    .font(AgoraTheme.cardTitleFont)
+                    .foregroundColor(AgoraTheme.ink)
+
+                Text("Pause at the best moments in the episode for AI-guided reflection.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+
+                Toggle(
+                    "Enable Interactive Prompts",
+                    isOn: Binding(
+                        get: { viewModel.interactiveModeEnabled },
+                        set: { viewModel.setInteractiveMode($0) }
+                    )
+                )
+                .font(AgoraTheme.bodyFont)
+                .foregroundColor(AgoraTheme.ink)
+                .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var handsFreeSettings: some View {
+        AgoraCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(
+                    "Complete Hands-Free",
+                    isOn: Binding(
+                        get: { viewModel.drivingModeEnabled },
+                        set: { viewModel.setHandsFreeMode($0) }
+                    )
+                )
+                .font(AgoraTheme.cardTitleFont)
+                .foregroundColor(AgoraTheme.ink)
+                .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+
+                Text("Prompts are read aloud. Speak your answer, then hear your score and corrections automatically.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+
+                Text("Say \"Repeat the question,\" \"Start over,\" or \"Skip this question\" at any time.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+
+                Divider()
+
+                narrationSettings
+
+                #if targetEnvironment(simulator)
+                Text("Testing on Mac: in Simulator, choose I/O > Audio Input > Mac microphone.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.accent)
+                #endif
+
+                if !viewModel.drivingStatusText.isEmpty {
+                    Text(viewModel.drivingStatusText)
+                        .font(AgoraTheme.tagFont)
+                        .foregroundColor(viewModel.drivingModeEnabled ? AgoraTheme.accent : .red)
+                }
+
+                if viewModel.handsFreeNeedsSettings {
+                    #if canImport(UIKit)
+                    Button("Open Privacy Settings") {
+                        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                        openURL(settingsURL)
+                    }
+                    .buttonStyle(AgoraOutlineButtonStyle())
+                    .accessibilityHint("Opens microphone and speech permissions for The Agora LA")
+                    #endif
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var narrationSettings: some View {
+        if let selectedVoice = selectedNarrationVoice {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Narrator")
+                    .font(AgoraTheme.tagFont.weight(.bold))
+                    .foregroundColor(AgoraTheme.ink)
+
+                Menu {
+                    ForEach(viewModel.narrationVoiceOptions) { option in
+                        Button {
+                            viewModel.selectedNarrationVoiceID = option.id
+                        } label: {
+                            if option.id == viewModel.selectedNarrationVoiceID {
+                                Label(option.name, systemImage: "checkmark")
+                            } else {
+                                Text(option.name)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(selectedVoice.name)
+                            .font(AgoraTheme.bodyFont.weight(.semibold))
+                            .foregroundColor(AgoraTheme.ink)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(AgoraTheme.accent)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white.opacity(0.68))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+                    )
+                    .cornerRadius(12)
+                }
+                .accessibilityLabel("Narrator voice")
+                .accessibilityValue(selectedVoice.name)
+
+                Text(selectedVoice.detail)
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+
+                HStack(spacing: 16) {
+                    Button {
+                        viewModel.previewNarrationVoice()
+                    } label: {
+                        Label("Preview Voice", systemImage: "speaker.wave.2.fill")
+                    }
+                    .disabled(viewModel.drivingPromptState != .idle)
+
+                    if viewModel.selectedNarrationVoiceID != NarrationVoiceOption.automaticID {
+                        Button("Use Best Available") {
+                            viewModel.selectedNarrationVoiceID = NarrationVoiceOption.automaticID
+                        }
+                    }
+                }
+                .font(AgoraTheme.tagFont.weight(.semibold))
+                .foregroundColor(AgoraTheme.accent)
+            }
+        }
     }
 
     private var selectedNarrationVoice: NarrationVoiceOption? {
