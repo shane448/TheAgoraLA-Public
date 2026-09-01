@@ -30,7 +30,8 @@ test("server-renders the production home page", async () => {
   const html = await response.text();
   assert.match(html, /The Agora LA/);
   assert.match(html, /Turn every podcast into a practice field/);
-  assert.match(html, /Your AI account\. Your usage\. No Agora bill/);
+  assert.match(html, /Bring the AI you already use/);
+  assert.doesNotMatch(html, /No Agora bill/i);
   assert.match(html, /href="\/privacy"/);
   assert.match(html, /href="\/terms"/);
   assert.match(html, /href="\/support"/);

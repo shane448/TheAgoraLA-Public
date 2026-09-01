@@ -84,21 +84,21 @@ export default function Home() {
       <section className="ownership-section">
         <div className="page-shell ownership-grid">
           <div>
-            <p className="eyebrow eyebrow-light">Free by design</p>
-            <h2>Your AI account. Your usage. No Agora bill.</h2>
+            <p className="eyebrow eyebrow-light">Your AI, ready to learn</p>
+            <h2>Bring the AI you already use.</h2>
           </div>
           <div className="ownership-copy">
             <p>
-              The Agora does not sell credits, subscriptions, paid features, or
-              AI access. Listeners authorize an AI provider account they control.
-              If that provider charges for usage, the relationship is directly
-              between the listener and the provider.
+              Connect an AI provider account you already control once, then use
+              it to analyze complete episodes, generate custom prompts, and
+              evaluate spoken or typed answers. Choose the quality level that
+              fits each podcast.
             </p>
             <p>
-              Provider credentials stay in the iPhone Keychain. When cloud
-              analysis is requested, an encrypted temporary copy powers that
-              listener&apos;s job and is erased when it finishes. The Agora does not
-              receive a payment share or operate an AI billing account.
+              Setup is guided and saved securely in the iPhone Keychain, making
+              every new episode faster to prepare. For cloud analysis, an
+              encrypted temporary credential powers the job and is erased when
+              it finishes.
             </p>
             <Link className="text-link light-link" href="/privacy">
               Read our privacy policy
