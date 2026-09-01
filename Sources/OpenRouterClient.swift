@@ -60,6 +60,26 @@ struct OpenRouterScore {
     }
 }
 
+private enum ListenerUnderstanding: String {
+    case correct
+    case mostlyCorrect = "mostly_correct"
+    case partial
+    case incorrect
+
+    var scoreRange: ClosedRange<Int> {
+        switch self {
+        case .correct: return 92...100
+        case .mostlyCorrect: return 85...91
+        case .partial: return 60...84
+        case .incorrect: return 0...59
+        }
+    }
+
+    func adjustedScore(_ score: Int) -> Int {
+        min(max(score, scoreRange.lowerBound), scoreRange.upperBound)
+    }
+}
+
 private final class ExportSessionBox: @unchecked Sendable {
     let session: AVAssetExportSession
 
@@ -434,9 +454,15 @@ final class OpenRouterClient: @unchecked Sendable {
 
     func score(question: String, expectedAnswer: String, userAnswer: String) async throws -> OpenRouterScore {
         let system = """
-        You are a rigorous but encouraging podcast-learning evaluator. Compare every substantive claim in the listener's answer with the podcast-supported answer. Judge semantic meaning rather than exact wording and give full credit for accurate paraphrases.
+        You are a gracious and encouraging podcast-learning evaluator. Evaluate semantic understanding, not matching words. Treat concise answers and accurate paraphrases generously. Do not penalize grammar, speaking style, hesitation, brevity, or missing supporting detail when the listener communicated the central answer. Only require an exact name, number, list, or quotation when the question explicitly asks for it.
 
-        Identify specifically what the listener understood correctly. Then identify incorrect claims, unsupported additions, and important omitted ideas. Do not use generic praise or claim something is missing when the listener expressed it in different words. Finally, explain how to improve with a concise, corrected answer that directly answers the question. Use only information in the supplied podcast-supported answer. Make each field useful even for a fully correct answer; when there is no material error, say so clearly and suggest only a precise refinement. Base the numeric score on accuracy, completeness, relevance, and absence of contradictions.
+        First classify the listener's understanding:
+        - correct: The central answer is accurate. Minor omissions or imprecision are acceptable. Score 92-100.
+        - mostly_correct: The answer is directionally right or in the right ballpark and captures the main conclusion or an important supporting reason without contradicting the central answer. Score 85-91.
+        - partial: The answer shows relevant understanding but misses or confuses a central part. Score 60-84.
+        - incorrect: The answer is empty, unrelated, or contradicts the central answer. Score 0-59.
+
+        Identify specifically what the listener understood correctly before discussing gaps. Never claim an idea is missing when it appears in different words. Use only the podcast-supported answer and do not introduce outside facts. When the answer is correct or mostly correct, say that no essential correction is needed and offer refinements as optional detail rather than faults. Feedback should be concise, supportive, and directly useful.
         """
         let user = """
         Question: \(question)
@@ -448,8 +474,12 @@ final class OpenRouterClient: @unchecked Sendable {
         let schema: [String: Any] = [
             "type": "object",
             "additionalProperties": false,
-            "required": ["score", "what_was_good", "what_needs_work", "how_to_improve"],
+            "required": ["understanding", "score", "what_was_good", "what_needs_work", "how_to_improve"],
             "properties": [
+                "understanding": [
+                    "type": "string",
+                    "enum": ["correct", "mostly_correct", "partial", "incorrect"],
+                ],
                 "score": ["type": "integer", "minimum": 0, "maximum": 100],
                 "what_was_good": ["type": "string"],
                 "what_needs_work": ["type": "string"],
@@ -481,6 +511,8 @@ final class OpenRouterClient: @unchecked Sendable {
             )
         }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let understandingValue = object["understanding"] as? String,
+              let understanding = ListenerUnderstanding(rawValue: understandingValue),
               let score = (object["score"] as? NSNumber)?.intValue,
               let whatWasGood = object["what_was_good"] as? String,
               let whatNeedsWork = object["what_needs_work"] as? String,
@@ -488,7 +520,7 @@ final class OpenRouterClient: @unchecked Sendable {
             throw OpenRouterClientError.invalidResponse
         }
         return OpenRouterScore(
-            score: min(max(score, 0), 100),
+            score: understanding.adjustedScore(score),
             whatWasGood: whatWasGood,
             whatNeedsWork: whatNeedsWork,
             howToImprove: howToImprove

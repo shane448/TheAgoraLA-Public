@@ -16,6 +16,7 @@ import {
 } from "./appleOAuth.js";
 import { AgoraOpenAI } from "./openAIClient.js";
 import { encryptProviderCredential } from "./providerCredential.js";
+import { graciousGradingInstructions, graciousScore, type UnderstandingLevel } from "./gradingPolicy.js";
 
 const appleSignInSchema = z.object({
   identity_token: z.string().min(20),
@@ -341,22 +342,23 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
       throw statusError(429, "You reached today's answer-feedback limit. Please try again later.");
     }
     const listenerAI = new AgoraOpenAI(config, body.provider_api_key, "https://openrouter.ai/api/v1");
-    const response = await listenerAI.structured<{ score: number; feedback: string }>({
+    const response = await listenerAI.structured<{ understanding: UnderstandingLevel; score: number; feedback: string }>({
       model: config.models.scoring,
       safetyID: createHash("sha256").update(session.userID).digest("hex"),
       effort: "low",
       schemaName: "listener_answer_score",
       schema: {
-        type: "object", additionalProperties: false, required: ["score", "feedback"],
+        type: "object", additionalProperties: false, required: ["understanding", "score", "feedback"],
         properties: {
+          understanding: { type: "string", enum: ["correct", "mostly_correct", "partial", "incorrect"] },
           score: { type: "integer", minimum: 0, maximum: 100 },
           feedback: { type: "string" },
         },
       },
-      instructions: "Grade semantic understanding against the podcast-supported answer. Credit correct paraphrases, penalize contradictions and missing central ideas, and give concise constructive feedback. Introduce no facts beyond the expected answer.",
+      instructions: graciousGradingInstructions,
       input: `Question: ${body.question}\nPodcast-supported answer: ${body.expected_answer}\nListener answer: ${body.user_answer}`,
     });
-    const boundedScore = Math.min(100, Math.max(0, Math.round(response.score)));
+    const boundedScore = graciousScore(response.score, response.understanding);
     await database.query(
       "INSERT INTO answer_scores(user_id, question_hash, score, model_version) VALUES ($1, $2, $3, $4)",
       [session.userID, createHash("sha256").update(body.question).digest("hex"), boundedScore, config.models.scoring],

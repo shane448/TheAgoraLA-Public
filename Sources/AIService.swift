@@ -652,11 +652,11 @@ final class AIService {
         let feedback: String
         switch score {
         case 85...100:
-            feedback = prefix + "Strong answer. You captured the main idea."
-        case 60..<85:
-            feedback = prefix + "Close. You have the gist, but missed a key detail: \(expectedAnswer)"
-        case 30..<60:
-            feedback = prefix + "Partial. Revisit this point: \(expectedAnswer)"
+            feedback = prefix + "Strong answer. You captured the main idea; any missing detail is a refinement, not a major error."
+        case 65..<85:
+            feedback = prefix + "You're in the right ballpark and earned solid credit. To make the answer stronger, add this detail: \(expectedAnswer)"
+        case 40..<65:
+            feedback = prefix + "You identified part of the idea. Here is the key point to add: \(expectedAnswer)"
         default:
             feedback = prefix + "Not quite. The podcast's answer is: \(expectedAnswer)"
         }
@@ -674,7 +674,7 @@ final class AIService {
         let precision = Double(overlap) / Double(userTokens.count)
         let recall = Double(overlap) / Double(expectedTokens.count)
         let f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0
-        var score = f1 * 100
+        var score = max(f1, (precision * 0.7) + (recall * 0.3)) * 100
 
         let expectedConcepts = conceptTokens(expectedAnswer)
         let userConcepts = conceptTokens(userAnswer)
@@ -690,6 +690,16 @@ final class AIService {
             score += 10
         } else if recall >= 0.55 {
             score += 5
+        }
+
+        // A short answer can express the central idea without repeating every word
+        // in a longer reference answer. Reward strong signal in the listener's words.
+        if overlap >= 2, precision >= 0.7 {
+            score = max(score, 85)
+        } else if overlap >= 2, precision >= 0.45 {
+            score = max(score, 72)
+        } else if overlap >= 1, precision >= 0.5 {
+            score = max(score, 60)
         }
         return min(100, max(0, Int(score.rounded())))
     }
