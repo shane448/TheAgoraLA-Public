@@ -5,6 +5,7 @@ final class EpisodeStore: ObservableObject {
     @Published var episode: Episode
 
     private let storageKey = "TheAgoraLA.Episode.Data"
+    private static let retiredDemoID = UUID(uuidString: "A60DD4CF-8B21-4A03-9D36-E43EC6C351AE")!
 
     private static var storageURL: URL? {
         guard let applicationSupport = FileManager.default.urls(
@@ -30,6 +31,11 @@ final class EpisodeStore: ObservableObject {
             UserDefaults.standard.removeObject(forKey: storageKey)
         } else {
             episode = MockEpisodeProvider.sample
+        }
+
+        if episode.id == Self.retiredDemoID {
+            episode = MockEpisodeProvider.sample
+            persist()
         }
     }
 
@@ -200,11 +206,6 @@ final class EpisodeStore: ObservableObject {
             transcript: episode.transcript,
             summary: summary
         )
-        persist()
-    }
-
-    func loadReviewDemo() {
-        episode = MockEpisodeProvider.reviewDemo
         persist()
     }
 

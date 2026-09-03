@@ -6,10 +6,8 @@ struct ContentView: View {
     @EnvironmentObject private var episodeStore: EpisodeStore
     @EnvironmentObject private var aiAccount: AIAccountStore
     @State private var showEditor = false
-    @State private var showTranscript = false
     @State private var showAIAccount = false
     @State private var showPlaybackSettings = false
-    @State private var isSummaryExpanded = false
 
     var body: some View {
         NavigationView {
@@ -19,6 +17,7 @@ struct ContentView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 18) {
                         header
+                        episodeEditorButton
 
                         if !hasUsableAI {
                             aiSetupCard
@@ -29,23 +28,11 @@ struct ContentView: View {
                                 PlayerView(viewModel: viewModel)
                             }
 
-                            episodeOverviewCard
                             donationCard
-
-                            if episodeStore.episode.audioURL.isFileURL,
-                               let demoPrompt = episodeStore.episode.prompts.first {
-                                demoPromptCard(demoPrompt)
-                            }
                         } else {
                             emptyEpisodeCard
                             donationCard
                         }
-
-                        Button("Edit Episode & Prompts") {
-                            showEditor = true
-                        }
-                        .buttonStyle(AgoraPillButtonStyle())
-                        .padding(.horizontal, 16)
 
                         pointsCard
                         legalLinks
@@ -64,12 +51,6 @@ struct ContentView: View {
                 .onDisappear {
                     viewModel.updateEpisode(episodeStore.episode)
                 }
-            }
-            .sheet(isPresented: $showTranscript) {
-                EpisodeTranscriptView(
-                    title: episodeStore.episode.title,
-                    transcript: episodeStore.episode.transcript ?? ""
-                )
             }
             .sheet(isPresented: $showAIAccount) {
                 AIAccountView()
@@ -100,11 +81,38 @@ struct ContentView: View {
 
     private var hasConfiguredEpisode: Bool {
         !episodeStore.episode.audioURL.isFileURL
-            || !(episodeStore.episode.transcript?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     private var hasUsableAI: Bool {
         aiAccount.isConnected
+    }
+
+    private var episodeEditorButton: some View {
+        Button {
+            showEditor = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: hasConfiguredEpisode ? "slider.horizontal.3" : "plus.circle.fill")
+                    .font(.system(size: 21, weight: .semibold))
+
+                Text(hasConfiguredEpisode ? "Edit Episode & Prompts" : "Import a Podcast")
+                    .font(AgoraTheme.buttonFont)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+        }
+        .buttonStyle(AgoraPillButtonStyle())
+        .padding(.horizontal, 16)
+        .accessibilityHint(
+            hasConfiguredEpisode
+                ? "Opens episode details and prompt editing"
+                : "Opens podcast import"
+        )
     }
 
     private var header: some View {
@@ -174,92 +182,10 @@ struct ContentView: View {
                 Text("Open the episode editor and paste an Apple Podcasts link or a direct audio link.")
                     .font(AgoraTheme.bodyFont)
                     .foregroundColor(AgoraTheme.inkMuted)
-                Button("Explore a Sample Lesson") {
-                    episodeStore.loadReviewDemo()
-                }
-                .buttonStyle(AgoraOutlineButtonStyle())
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
-    }
-
-    private func demoPromptCard(_ prompt: Prompt) -> some View {
-        VStack(spacing: 12) {
-            AgoraCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    AgoraTag(text: "Offline Demo")
-                    Text(prompt.question)
-                        .font(AgoraTheme.bodyFont)
-                        .foregroundColor(AgoraTheme.ink)
-                    Button("Answer Sample Question") {
-                        viewModel.presentPrompt(prompt)
-                    }
-                    .buttonStyle(AgoraPillButtonStyle())
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 16)
-
-            if viewModel.showPrompt, viewModel.activePrompt?.id == prompt.id {
-                InteractivePromptView(
-                    prompt: prompt,
-                    viewModel: viewModel,
-                    pointsStore: pointsStore
-                )
-            }
-        }
-    }
-
-    private var episodeOverviewCard: some View {
-        AgoraCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Episode Brief")
-                        .font(AgoraTheme.cardTitleFont)
-                        .foregroundColor(AgoraTheme.ink)
-                    Spacer()
-                    AgoraTag(text: episodeStore.episode.transcript == nil ? "Preparing" : "Ready")
-                }
-
-                if let summary = episodeStore.episode.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !summary.isEmpty {
-                    Text(summary)
-                        .font(AgoraTheme.bodyFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                        .lineLimit(isSummaryExpanded ? nil : 4)
-                        .fixedSize(horizontal: false, vertical: isSummaryExpanded)
-
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            isSummaryExpanded.toggle()
-                        }
-                    } label: {
-                        Label(
-                            isSummaryExpanded ? "Show Less" : "Read More",
-                            systemImage: isSummaryExpanded ? "chevron.up" : "chevron.down"
-                        )
-                    }
-                    .buttonStyle(AgoraOutlineButtonStyle())
-                    .accessibilityHint(isSummaryExpanded ? "Collapses the episode brief" : "Expands the episode brief")
-                } else {
-                    Text("Import the episode to prepare its summary and transcript.")
-                        .font(AgoraTheme.bodyFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                }
-
-                Button(episodeStore.episode.transcript == nil ? "Transcript is being prepared" : "View Full Transcript") {
-                    showTranscript = true
-                }
-                .buttonStyle(AgoraOutlineButtonStyle())
-                .disabled(episodeStore.episode.transcript == nil)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 16)
-        .onChange(of: episodeStore.episode.id) { _ in
-            isSummaryExpanded = false
-        }
     }
 
     private var pointsCard: some View {
