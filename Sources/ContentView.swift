@@ -117,11 +117,12 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text("THE AGORA LA")
+            Text("AGORA\nINTERACTIVE PODCAST")
                 .font(AgoraTheme.titleFont)
                 .foregroundColor(AgoraTheme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
+                .lineLimit(2)
+                .minimumScaleFactor(0.58)
+                .lineSpacing(-4)
                 .layoutPriority(1)
 
             Spacer()

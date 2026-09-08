@@ -43,7 +43,7 @@ struct CloudAnalysisClient {
         model: String,
         providerAPIKey: String,
         progress: @escaping (String) -> Void
-    ) async throws -> (EpisodeAnalysisResult, URL) {
+    ) async throws -> (EpisodeAnalysisResult, URL, UUID) {
         progress("Securely sending the episode to cloud analysis...")
         var body: [String: Any] = [
             "title": title,
@@ -61,13 +61,13 @@ struct CloudAnalysisClient {
         let pending = PendingCloudAnalysis(jobID: job.id, expectedAudioURL: audioURL)
         Self.savePending(pending)
         progress("Cloud analysis is running. You can safely leave the app and return later.")
-        return (try await waitForCompletion(pending, progress: progress), audioURL)
+        return (try await waitForCompletion(pending, progress: progress), audioURL, pending.jobID)
     }
 
-    func resumePending(progress: @escaping (String) -> Void) async throws -> (EpisodeAnalysisResult, URL)? {
+    func resumePending(progress: @escaping (String) -> Void) async throws -> (EpisodeAnalysisResult, URL, UUID)? {
         guard let pending = Self.pendingAnalysis else { return nil }
         progress("Reconnecting to your cloud analysis...")
-        return (try await waitForCompletion(pending, progress: progress), pending.expectedAudioURL)
+        return (try await waitForCompletion(pending, progress: progress), pending.expectedAudioURL, pending.jobID)
     }
 
     private func waitForCompletion(
@@ -81,7 +81,6 @@ struct CloudAnalysisClient {
             switch job.status {
             case "complete":
                 guard let result = job.result else { throw CloudAnalysisError.invalidResponse }
-                Self.clearPending()
                 progress("Cloud analysis complete.")
                 return result.episodeAnalysis
             case "failed":
@@ -165,6 +164,11 @@ struct CloudAnalysisClient {
 
     private static func clearPending() {
         UserDefaults.standard.removeObject(forKey: pendingKey)
+    }
+
+    static func acknowledgeSavedAnalysis(jobID: UUID?) {
+        guard let jobID, pendingAnalysis?.jobID == jobID else { return }
+        clearPending()
     }
 
     private func serviceMessage(from data: Data) -> String? {

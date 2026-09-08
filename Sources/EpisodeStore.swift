@@ -209,6 +209,29 @@ final class EpisodeStore: ObservableObject {
         persist()
     }
 
+    func saveAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) throws {
+        guard episode.audioURL == expectedAudioURL else {
+            throw CloudAnalysisError.service("This analysis belongs to a different episode. Your current podcast has not been changed.")
+        }
+        let updated = Episode(
+            id: episode.id,
+            title: episode.title,
+            audioURL: episode.audioURL,
+            sourceURL: episode.sourceURL,
+            prompts: analysis.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds },
+            feedURL: episode.feedURL,
+            episodeGUID: episode.episodeGUID,
+            transcript: analysis.transcript,
+            summary: analysis.summary
+        )
+        guard let url = Self.storageURL else {
+            throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
+        }
+        let data = try JSONEncoder().encode(updated)
+        try data.write(to: url, options: .atomic)
+        episode = updated
+    }
+
     private func persist() {
         guard let url = Self.storageURL, let data = try? JSONEncoder().encode(episode) else { return }
         try? data.write(to: url, options: .atomic)

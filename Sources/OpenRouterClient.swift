@@ -704,7 +704,7 @@ final class OpenRouterClient: @unchecked Sendable {
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(AppLinks.home.absoluteString, forHTTPHeaderField: "HTTP-Referer")
-        request.setValue("The Agora LA", forHTTPHeaderField: "X-OpenRouter-Title")
+        request.setValue("Agora Interactive Podcast", forHTTPHeaderField: "X-OpenRouter-Title")
         request.timeoutInterval = timeoutInterval
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
@@ -869,7 +869,7 @@ final class OpenRouterClient: @unchecked Sendable {
         request.setValue("Bearer \(try apiKey())", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(AppLinks.home.absoluteString, forHTTPHeaderField: "HTTP-Referer")
-        request.setValue("The Agora LA", forHTTPHeaderField: "X-OpenRouter-Title")
+        request.setValue("Agora Interactive Podcast", forHTTPHeaderField: "X-OpenRouter-Title")
         request.timeoutInterval = 180
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let responseData = try await perform(request)

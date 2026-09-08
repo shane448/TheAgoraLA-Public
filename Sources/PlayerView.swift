@@ -359,7 +359,7 @@ struct PlaybackSettingsView: View {
                         openURL(settingsURL)
                     }
                     .buttonStyle(AgoraOutlineButtonStyle())
-                    .accessibilityHint("Opens microphone and speech permissions for The Agora LA")
+                    .accessibilityHint("Opens microphone and speech permissions for Agora Interactive Podcast")
                     #endif
                 }
             }

@@ -472,7 +472,7 @@ struct PromptEditorView: View {
             let duration = imported.durationSeconds ?? estimateDurationFromTranscript(preferredTranscript ?? "")
             let automaticCount = min(12, max(3, Int((duration / 900).rounded(.up)) + 2))
             let count = promptCountMode == .manual ? selectedPromptCount : automaticCount
-            let (analysis, expectedURL) = try await CloudAnalysisClient().submitAndWait(
+            let (analysis, expectedURL, completedJobID) = try await CloudAnalysisClient().submitAndWait(
                 title: titleText,
                 audioURL: imported.audioURL,
                 transcript: preferredTranscript,
@@ -484,7 +484,8 @@ struct PromptEditorView: View {
                     Task { @MainActor in self.importStatusText = status }
                 }
             )
-            applyAnalysis(analysis, expectedAudioURL: expectedURL)
+            try applyAnalysis(analysis, expectedAudioURL: expectedURL)
+            CloudAnalysisClient.acknowledgeSavedAnalysis(jobID: completedJobID)
             selectedPromptCount = analysis.recommendedPromptCount
             importStatusText = "Episode brief, full transcript, and \(analysis.prompts.count) prompts are ready."
         } catch {
@@ -505,10 +506,11 @@ struct PromptEditorView: View {
                 importTask = nil
             }
             do {
-                guard let (analysis, expectedURL) = try await CloudAnalysisClient().resumePending(progress: { status in
+                guard let (analysis, expectedURL, completedJobID) = try await CloudAnalysisClient().resumePending(progress: { status in
                     Task { @MainActor in self.importStatusText = status }
                 }) else { return }
-                applyAnalysis(analysis, expectedAudioURL: expectedURL)
+                try applyAnalysis(analysis, expectedAudioURL: expectedURL)
+                CloudAnalysisClient.acknowledgeSavedAnalysis(jobID: completedJobID)
                 selectedPromptCount = analysis.recommendedPromptCount
                 importStatusText = "Your cloud analysis is complete and ready."
             } catch {
@@ -604,7 +606,7 @@ struct PromptEditorView: View {
                     }
                 }
             )
-            applyAnalysis(analysis, expectedAudioURL: imported.audioURL)
+            try applyAnalysis(analysis, expectedAudioURL: imported.audioURL)
             if promptCountMode == .automatic {
                 selectedPromptCount = analysis.recommendedPromptCount
             }
@@ -635,16 +637,13 @@ struct PromptEditorView: View {
     }
 
     @MainActor
-    private func applyAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) {
-        guard episodeStore.episode.audioURL == expectedAudioURL else { return }
+    private func applyAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) throws {
+        try episodeStore.saveAnalysis(analysis, expectedAudioURL: expectedAudioURL)
         transcriptText = analysis.transcript
         summaryText = analysis.summary
         if analysis.duration.isFinite, analysis.duration > 10 {
             PlayerDurationCache.shared.duration = analysis.duration
         }
-        episodeStore.updateTranscript(analysis.transcript)
-        episodeStore.updateSummary(analysis.summary)
-        episodeStore.replacePrompts(analysis.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds })
     }
 
     private func validatedInputURL() throws -> URL {
