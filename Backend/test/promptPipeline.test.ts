@@ -23,6 +23,18 @@ function prompt(overrides: Partial<EpisodePrompt> = {}): EpisodePrompt {
 }
 
 describe("prompt quality gates", () => {
+  it("waits until the supporting passage ends, even when it starts at zero", () => {
+    const [result] = validateAndRankPrompts([prompt()], transcript, 120);
+    expect(result!.time).toBeGreaterThan(40);
+    expect(result!.time).toBeLessThanOrEqual(120);
+  });
+
+  it("rejects a fabricated second passage even when the first is real", () => {
+    const candidate = prompt();
+    candidate.evidence.push({ quote: "Fabricated evidence about respect that never appeared in this episode at all.", start_seconds: 50, end_seconds: 60 });
+    expect(validateAndRankPrompts([candidate], transcript, 120)).toHaveLength(0);
+  });
+
   it("keeps an episode-specific question with exact transcript evidence", () => {
     expect(validateAndRankPrompts([prompt()], transcript, 120)).toHaveLength(1);
   });
