@@ -517,12 +517,20 @@ final class PlayerViewModel: NSObject, ObservableObject {
         try? await Task.sleep(nanoseconds: 400_000_000)
         guard drivingModeEnabled, showPrompt, drivingPromptState == .listening else { return }
         var started = await speechManager.startRecording()
+        guard !Task.isCancelled, drivingModeEnabled, showPrompt, drivingPromptState == .listening else {
+            speechManager.stopRecording()
+            return
+        }
         if !started, !speechManager.authorizationNeedsSettings, microphoneStartRetryCount == 0 {
             microphoneStartRetryCount += 1
             drivingStatusText = "Reconnecting to the microphone..."
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard drivingModeEnabled, showPrompt, drivingPromptState == .listening else { return }
             started = await speechManager.startRecording()
+        }
+        guard !Task.isCancelled, drivingModeEnabled, showPrompt, drivingPromptState == .listening else {
+            speechManager.stopRecording()
+            return
         }
         guard started else {
             if speechManager.authorizationNeedsSettings {
@@ -538,7 +546,9 @@ final class PlayerViewModel: NSObject, ObservableObject {
             return
         }
         microphoneStartRetryCount = 0
+        listeningStartDate = Date()
         drivingStatusText = "Listening on \(speechManager.inputName)..."
+        drivingStatusText += " Pause to submit; up to 90 seconds per answer."
         startSilenceWatch()
     }
 
@@ -547,10 +557,16 @@ final class PlayerViewModel: NSObject, ObservableObject {
         silenceWatchTask = Task { @MainActor in
             while !Task.isCancelled && drivingPromptState == .listening && showPrompt {
                 try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled, drivingModeEnabled, drivingPromptState == .listening, showPrompt else { return }
                 let transcript = speechManager.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                 let listenTime = Date().timeIntervalSince(listeningStartDate)
 
                 if transcript.isEmpty {
+                    if !speechManager.isRecording {
+                        silenceWatchTask = nil
+                        await handleEmptyListeningAttempt()
+                        return
+                    }
                     if listenTime >= 15, !speechManager.hasDetectedVoice {
                         await handleEmptyListeningAttempt()
                         return
@@ -575,7 +591,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
                 let latestActivity = max(transcriptUpdateDate, speechManager.lastVoiceActivityDate)
                 let silence = Date().timeIntervalSince(latestActivity)
-                if silence >= 2.8 && listenTime >= 2.5 {
+                if (silence >= 3.5 && listenTime >= 3.5) || listenTime >= 90 {
                     // Cancelling this task here would also cancel its URLSession grading request.
                     silenceWatchTask = nil
                     await stopListeningAndSubmitIfPossible()
@@ -913,6 +929,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
                     activeSpeechUtterance = nil
                     activeSpeechState = nil
                     speechSynthesizer.stopSpeaking(at: .immediate)
+                    // The recovery task also starts listening; do not cancel it during the transition.
+                    speechWatchdogTask = nil
                     await advanceAfterSpeech(from: expectedState)
                     return
                 }

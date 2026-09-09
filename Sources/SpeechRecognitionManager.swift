@@ -18,6 +18,7 @@ final class SpeechRecognitionManager: ObservableObject {
     private let recognizer = SFSpeechRecognizer()
     private var hasInstalledInputTap = false
     private var recognitionSessionID = UUID()
+    private var recordingStartID = UUID()
     private var finalizationContinuation: CheckedContinuation<String, Never>?
     private var finalizationTimeoutTask: Task<Void, Never>?
 
@@ -64,7 +65,10 @@ final class SpeechRecognitionManager: ObservableObject {
     @discardableResult
     func startRecording() async -> Bool {
         guard !isRecording else { return true }
+        let startID = UUID()
+        recordingStartID = startID
         guard await requestAuthorization() else { return false }
+        guard !Task.isCancelled, recordingStartID == startID else { return false }
         stopRecording()
         transcript = ""
         lastErrorMessage = nil
@@ -80,9 +84,8 @@ final class SpeechRecognitionManager: ObservableObject {
                 options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP]
             )
             try session.setActive(true, options: [])
-            if let builtInMicrophone = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-                try? session.setPreferredInput(builtInMicrophone)
-            }
+            // Let the system honor the listener's headset or selected microphone.
+            try? session.setPreferredInput(nil)
             #if targetEnvironment(simulator)
             inputName = "Mac microphone"
             #else
@@ -98,6 +101,9 @@ final class SpeechRecognitionManager: ObservableObject {
             }
 
             let newRequest = SFSpeechAudioBufferRecognitionRequest()
+            guard recognizer?.isAvailable == true else {
+                throw SpeechRecognitionError.recognizerUnavailable
+            }
             newRequest.shouldReportPartialResults = true
             newRequest.taskHint = .dictation
             request = newRequest
@@ -163,6 +169,7 @@ final class SpeechRecognitionManager: ObservableObject {
     }
 
     func stopRecording() {
+        recordingStartID = UUID()
         stopAudioCapture()
         recognitionSessionID = UUID()
         request?.endAudio()
