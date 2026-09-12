@@ -1,6 +1,13 @@
 # Agora Cloud Analysis
 
-This service runs long podcast transcription and prompt generation outside the iPhone process. A submitted job continues when the listener backgrounds or closes the app.
+This service runs long podcast transcription and prompt generation outside the iPhone process. A submitted job continues when the listener backgrounds or closes the app. The phone sends only episode metadata and a provider credential; the server fetches published transcripts or audio over its own connection.
+
+## Processing pipeline
+
+- Published RSS transcripts are preferred and normalized from JSON, WebVTT, SRT, HTML, or plain text, avoiding transcription entirely when possible.
+- Audio is downloaded by the server, split only when needed, and transcribed concurrently while preserving episode order.
+- Transcript sections are scanned concurrently by the extraction model. Exact quotes are validated against the full transcript before one high-reasoning curation pass selects the final summary and prompts.
+- `TRANSCRIPTION_CONCURRENCY` and `ANALYSIS_CONCURRENCY` bound parallel requests so deployments can tune latency without weakening quality checks.
 
 ## Privacy and billing
 

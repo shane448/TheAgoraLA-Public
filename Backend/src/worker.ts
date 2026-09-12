@@ -38,7 +38,11 @@ export function startAnalysisWorker(database: Database, config: AppConfig) {
            SET status = 'complete', result = $2, model_version = $3,
                provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW()
            WHERE id = $1`,
-          [job.id, JSON.stringify(result), `${config.models.extraction}+${config.models.curation}`],
+          [
+            job.id,
+            JSON.stringify(result),
+            `${config.models.transcription}+${config.models.extraction}+${job.input.model ?? config.models.curation}`,
+          ],
         );
       } catch (error) {
         const message = error instanceof Error ? error.message.slice(0, 1_000) : "Episode analysis failed.";

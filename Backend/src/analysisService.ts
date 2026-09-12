@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import type { AgoraOpenAI } from "./openAIClient.js";
 import { analyzeTranscript } from "./promptPipeline.js";
-import { transcribeRemoteAudio } from "./transcription.js";
+import { downloadRemoteTranscript, transcribeRemoteAudio } from "./transcription.js";
 
 export interface AnalysisJobInput {
   title?: string;
   audio_url?: string;
   transcript?: string;
+  transcript_url?: string;
+  transcript_type?: string;
   duration?: number;
   prompt_count: number;
   model?: string;
@@ -20,6 +22,16 @@ export async function processEpisodeAnalysis(options: {
   config: AppConfig;
 }) {
   let transcript = options.input.transcript?.replace(/\s+/g, " ").trim() ?? "";
+  if (transcript.split(/\s+/).filter(Boolean).length < 120 && options.input.transcript_url) {
+    try {
+      transcript = await downloadRemoteTranscript(
+        options.input.transcript_url,
+        options.input.transcript_type,
+      );
+    } catch (error) {
+      if (!options.input.audio_url) throw error;
+    }
+  }
   if (transcript.split(/\s+/).filter(Boolean).length < 120) {
     if (!options.input.audio_url) throw new Error("A complete transcript or public audio URL is required.");
     transcript = await transcribeRemoteAudio(options.input.audio_url, options.openAI, options.config);
@@ -33,7 +45,7 @@ export async function processEpisodeAnalysis(options: {
     ? options.input.duration
     : estimatedDuration;
   const analysisConfig = options.input.model
-    ? { ...options.config, models: { ...options.config.models, extraction: options.input.model, curation: options.input.model } }
+    ? { ...options.config, models: { ...options.config.models, curation: options.input.model } }
     : options.config;
   const analysis = await analyzeTranscript({
     transcript,

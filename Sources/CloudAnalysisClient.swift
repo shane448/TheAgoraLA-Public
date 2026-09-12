@@ -26,6 +26,14 @@ struct CloudAnalysisClient {
     private static let installationKey = "TheAgoraLA.Cloud.InstallationID"
     private static let sessionKey = "TheAgoraLA.Cloud.SessionToken"
     private static let pendingKey = "TheAgoraLA.Cloud.PendingAnalysis"
+    private static let networkSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 45
+        configuration.timeoutIntervalForResource = 180
+        configuration.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: configuration)
+    }()
 
     static var isConfigured: Bool { baseURL != nil }
 
@@ -38,6 +46,7 @@ struct CloudAnalysisClient {
         title: String,
         audioURL: URL,
         transcript: String?,
+        transcriptSource: PodcastTranscriptSource?,
         duration: Double?,
         promptCount: Int,
         model: String,
@@ -54,6 +63,11 @@ struct CloudAnalysisClient {
         ]
         if let transcript, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             body["transcript"] = transcript
+        } else if let transcriptSource {
+            body["transcript_url"] = transcriptSource.url.absoluteString
+            if let type = transcriptSource.type, !type.isEmpty {
+                body["transcript_type"] = type
+            }
         }
         if let duration, duration > 10 { body["duration"] = duration }
         let data = try await authorizedRequest(path: "v1/episode-jobs", method: "POST", body: body)
@@ -74,6 +88,7 @@ struct CloudAnalysisClient {
         _ pending: PendingCloudAnalysis,
         progress: @escaping (String) -> Void
     ) async throws -> EpisodeAnalysisResult {
+        var pollDelayNanoseconds: UInt64 = 2_000_000_000
         while true {
             try Task.checkCancellation()
             let data = try await authorizedRequest(path: "v1/episode-jobs/\(pending.jobID.uuidString)", method: "GET")
@@ -91,7 +106,8 @@ struct CloudAnalysisClient {
             default:
                 progress("Your episode is queued in the cloud. You can leave the app.")
             }
-            try await Task.sleep(nanoseconds: 4_000_000_000)
+            try await Task.sleep(nanoseconds: pollDelayNanoseconds)
+            pollDelayNanoseconds = min(pollDelayNanoseconds + 2_000_000_000, 12_000_000_000)
         }
     }
 
@@ -100,7 +116,7 @@ struct CloudAnalysisClient {
         for attempt in 0...1 {
             var request = try makeRequest(path: path, method: method, body: body)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await send(request)
             guard let http = response as? HTTPURLResponse else { throw CloudAnalysisError.invalidResponse }
             if http.statusCode == 401, attempt == 0 {
                 UserDefaults.standard.removeObject(forKey: Self.sessionKey)
@@ -129,7 +145,7 @@ struct CloudAnalysisClient {
             method: "POST",
             body: ["installation_id": installationID]
         )
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await send(request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let token = (try? JSONDecoder().decode(SessionEnvelope.self, from: data))?.token else {
             throw CloudAnalysisError.service(serviceMessage(from: data) ?? "The cloud session could not be started.")
@@ -149,6 +165,36 @@ struct CloudAnalysisClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         return request
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                let result = try await Self.networkSession.data(for: request)
+                if let response = result.1 as? HTTPURLResponse,
+                   [429, 502, 503, 504].contains(response.statusCode),
+                   attempt < 2 {
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+                    continue
+                }
+                return result
+            } catch {
+                lastError = error
+                guard attempt < 2, shouldRetryNetworkError(error) else { throw error }
+                try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+            }
+        }
+        throw lastError ?? CloudAnalysisError.invalidResponse
+    }
+
+    private func shouldRetryNetworkError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [
+            .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+            .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
+            .callIsActive, .dataNotAllowed,
+        ].contains(urlError.code)
     }
 
     private static var baseURL: URL? {

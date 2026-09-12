@@ -476,6 +476,7 @@ struct PromptEditorView: View {
                 title: titleText,
                 audioURL: imported.audioURL,
                 transcript: preferredTranscript,
+                transcriptSource: imported.transcriptSource,
                 duration: duration > 10 ? duration : nil,
                 promptCount: count,
                 model: AIAccountStore.selectedModelID(),

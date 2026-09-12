@@ -128,7 +128,7 @@ export async function analyzeTranscript(options: {
 }): Promise<{ summary: string; prompts: EpisodePrompt[] }> {
   const normalizedTranscript = normalizeWhitespace(options.transcript);
   const chunks = transcriptChunks(normalizedTranscript, options.duration);
-  const extractedBatches = await mapConcurrent(chunks, 3, async (chunk, index) => {
+  const extractedBatches = await mapConcurrent(chunks, options.config.analysisConcurrency, async (chunk, index) => {
     const response = await options.openAI.structured<{ ideas: ExtractedIdea[] }>({
       model: options.config.models.extraction,
       safetyID: options.safetyID,

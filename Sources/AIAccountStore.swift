@@ -31,7 +31,7 @@ enum AIPowerLevel: String, CaseIterable, Identifiable {
         switch self {
         case .balanced: return "openai/gpt-5.6-terra"
         case .economical: return "openai/gpt-5.6-luna"
-        case .maximum: return "openai/gpt-5.6-sol"
+        case .maximum: return "openai/gpt-6-astra"
         }
     }
 }

@@ -30,11 +30,16 @@ const analysisJobSchema = z.object({
   title: z.string().trim().max(300).optional(),
   audio_url: z.string().url().startsWith("https://").optional(),
   transcript: z.string().max(2_000_000).optional(),
+  transcript_url: z.string().url().startsWith("https://").max(2_000).optional(),
+  transcript_type: z.string().trim().max(120).optional(),
   duration: z.number().positive().max(86_400).optional(),
   prompt_count: z.number().int().min(3).max(12).default(5),
   model: z.string().trim().min(3).max(150).optional(),
   provider_api_key: z.string().trim().startsWith("sk-or-").max(500),
-}).refine((value) => Boolean(value.audio_url || value.transcript), "An audio URL or transcript is required.");
+}).refine(
+  (value) => Boolean(value.audio_url || value.transcript || value.transcript_url),
+  "An audio URL, transcript, or published transcript URL is required.",
+);
 
 const scoreSchema = z.object({
   question: z.string().min(5).max(500),
@@ -44,7 +49,7 @@ const scoreSchema = z.object({
 });
 
 const publicDirectory = new URL("../public/", import.meta.url);
-const analysisPipelineVersion = "2026-08-31.2";
+const analysisPipelineVersion = "2026-09-12.1";
 
 interface AnalysisJobRow {
   id: string;
@@ -266,6 +271,8 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
       title: input.title?.replace(/\s+/g, " ").trim() ?? null,
       audio_url: input.audio_url ?? null,
       transcript: input.transcript?.replace(/\s+/g, " ").trim() ?? null,
+      transcript_url: input.transcript_url ?? null,
+      transcript_type: input.transcript_type ?? null,
       duration: input.duration ?? null,
       prompt_count: input.prompt_count,
       model: input.model ?? null,
