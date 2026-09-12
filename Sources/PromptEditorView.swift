@@ -489,9 +489,19 @@ struct PromptEditorView: View {
             selectedPromptCount = analysis.recommendedPromptCount
             importStatusText = "Episode brief, full transcript, and \(analysis.prompts.count) prompts are ready."
         } catch {
+            if !operationWasCancelled(error), shouldFallBackToDirectAnalysis(error) {
+                importStatusText = "Cloud analysis is unavailable. Continuing through your connected AI; keep Agora open for this run."
+                await prepareCompleteEpisode(imported, preferredTranscript: preferredTranscript)
+                return
+            }
             importStatusText = "Episode details were saved, but cloud analysis could not finish."
             presentAnalysisError(error)
         }
+    }
+
+    private func shouldFallBackToDirectAnalysis(_ error: Error) -> Bool {
+        if error is URLError || error is CloudAnalysisError { return true }
+        return false
     }
 
     @MainActor

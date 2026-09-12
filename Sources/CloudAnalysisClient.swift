@@ -172,12 +172,21 @@ struct CloudAnalysisClient {
     }
 
     private func serviceMessage(from data: Data) -> String? {
-        (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.error
+        (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.displayMessage
     }
 }
 
 private struct SessionEnvelope: Decodable { let token: String }
-private struct ErrorEnvelope: Decodable { let error: String }
+private struct ErrorEnvelope: Decodable {
+    let error: String?
+    let message: String?
+
+    var displayMessage: String? {
+        [error, message]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+}
 
 private struct JobEnvelope: Decodable {
     let id: UUID
