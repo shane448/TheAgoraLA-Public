@@ -15,43 +15,26 @@ interface ClaimedJob {
 
 export function startAnalysisWorker(database: Database, config: AppConfig) {
   let stopped = false;
-  let busy = false;
+  let claiming = false;
+  const activeJobs = new Set<Promise<void>>();
 
   const tick = async () => {
-    if (stopped || busy) return;
-    busy = true;
+    if (stopped || claiming || activeJobs.size >= config.jobWorkerConcurrency) return;
+    claiming = true;
     try {
-      const job = await claimNextJob(database);
-      if (!job) return;
-      const heartbeat = setInterval(() => {
-        void database.query(
-          "UPDATE analysis_jobs SET updated_at = NOW() WHERE id = $1 AND status = 'processing'",
-          [job.id],
-        ).catch((error) => console.error("Analysis job heartbeat failed", error));
-      }, 30_000);
-      try {
-        const providerKey = decryptProviderCredential(job.provider_credential_encrypted, config);
-        const openAI = new AgoraOpenAI(config, providerKey, "https://openrouter.ai/api/v1");
-        const result = await processEpisodeAnalysis({ input: job.input, userID: job.user_id, openAI, config });
-        await database.query(
-          `UPDATE analysis_jobs
-           SET status = 'complete', result = $2, model_version = $3,
-               provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW()
-           WHERE id = $1`,
-          [
-            job.id,
-            JSON.stringify(result),
-            `${config.models.transcription}+${config.models.extraction}+${job.input.model ?? config.models.curation}`,
-          ],
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message.slice(0, 1_000) : "Episode analysis failed.";
-        await refundFailedJob(database, job, message);
-      } finally {
-        clearInterval(heartbeat);
+      while (!stopped && activeJobs.size < config.jobWorkerConcurrency) {
+        const job = await claimNextJob(database);
+        if (!job) break;
+        const task = processClaimedJob(database, config, job)
+          .catch((error) => console.error("Analysis worker job failed", error));
+        activeJobs.add(task);
+        void task.finally(() => {
+          activeJobs.delete(task);
+          runTick();
+        });
       }
     } finally {
-      busy = false;
+      claiming = false;
     }
   };
 
@@ -75,8 +58,38 @@ export function startAnalysisWorker(database: Database, config: AppConfig) {
     clearInterval(timer);
     clearInterval(recoveryTimer);
     clearInterval(retentionTimer);
-    while (busy) await new Promise((resolve) => setTimeout(resolve, 250));
+    await Promise.allSettled(Array.from(activeJobs));
   };
+}
+
+async function processClaimedJob(database: Database, config: AppConfig, job: ClaimedJob): Promise<void> {
+  const heartbeat = setInterval(() => {
+    void database.query(
+      "UPDATE analysis_jobs SET updated_at = NOW() WHERE id = $1 AND status = 'processing'",
+      [job.id],
+    ).catch((error) => console.error("Analysis job heartbeat failed", error));
+  }, 30_000);
+  try {
+    const providerKey = decryptProviderCredential(job.provider_credential_encrypted, config);
+    const openAI = new AgoraOpenAI(config, providerKey, "https://openrouter.ai/api/v1");
+    const result = await processEpisodeAnalysis({ input: job.input, userID: job.user_id, openAI, config });
+    await database.query(
+      `UPDATE analysis_jobs
+       SET status = 'complete', result = $2, model_version = $3,
+           provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW()
+       WHERE id = $1`,
+      [
+        job.id,
+        JSON.stringify(result),
+        `${config.models.transcription}+${config.models.extraction}+${job.input.model ?? config.models.curation}`,
+      ],
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 1_000) : "Episode analysis failed.";
+    await refundFailedJob(database, job, message);
+  } finally {
+    clearInterval(heartbeat);
+  }
 }
 
 async function deleteExpiredJobs(database: Database, retentionDays: number): Promise<void> {

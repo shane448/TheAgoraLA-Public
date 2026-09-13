@@ -41,6 +41,7 @@ struct PromptEditorView: View {
     @State private var promptCountMode: PromptCountMode = .automatic
     @State private var showAdditionalPromptsStack = false
     @State private var showAIAccount = false
+    @State private var showPodcastBacklog = false
     @State private var importTask: Task<Void, Never>?
     @State private var loadedSourceText = ""
     @State private var isLoadingSavedEpisode = false
@@ -89,6 +90,29 @@ struct PromptEditorView: View {
                     .buttonStyle(AgoraOutlineButtonStyle())
                 }
             }
+
+            Button {
+                showPodcastBacklog = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "rectangle.stack.badge.plus")
+                        .font(.system(size: 21, weight: .semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Build a Podcast Backlog")
+                            .font(AgoraTheme.buttonFont)
+                        Text("Analyze several episodes in the cloud")
+                            .font(AgoraTheme.tagFont)
+                            .opacity(0.9)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .bold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+            }
+            .buttonStyle(AgoraPillButtonStyle())
+            .accessibilityHint("Opens the multi-episode podcast analysis queue")
 
             AgoraCard {
                 VStack(alignment: .leading, spacing: 12) {
@@ -348,16 +372,11 @@ struct PromptEditorView: View {
         }
         .padding(16)
         .onAppear {
-            isLoadingSavedEpisode = true
-            audioURLText = episodeStore.episode.audioURL.isFileURL
-                ? ""
-                : (episodeStore.episode.sourceURL ?? episodeStore.episode.audioURL).absoluteString
-            loadedSourceText = normalizedSourceText(audioURLText)
-            titleText = episodeStore.episode.audioURL.isFileURL ? "" : episodeStore.episode.title
-            transcriptText = episodeStore.episode.transcript ?? ""
-            summaryText = episodeStore.episode.summary ?? ""
-            isLoadingSavedEpisode = false
+            loadSavedEpisodeFields()
             resumeCloudAnalysisIfNeeded()
+        }
+        .onChange(of: episodeStore.episode.id) { _ in
+            loadSavedEpisodeFields()
         }
         .onChange(of: audioURLText) { newValue in
             guard !isLoadingSavedEpisode, normalizedSourceText(newValue) != loadedSourceText else { return }
@@ -389,6 +408,10 @@ struct PromptEditorView: View {
             AIAccountView()
                 .environmentObject(aiAccount)
         }
+        .sheet(isPresented: $showPodcastBacklog) {
+            PodcastBacklogView(episodeStore: episodeStore)
+                .environmentObject(aiAccount)
+        }
     }
 
     private var hasUsableAI: Bool {
@@ -403,6 +426,21 @@ struct PromptEditorView: View {
         aiAccount.isConnected
             ? "Analysis is billed directly to the provider account you connected."
             : "The Agora is free. Connect a provider account to run transcript analysis."
+    }
+
+    @MainActor
+    private func loadSavedEpisodeFields() {
+        isLoadingSavedEpisode = true
+        audioURLText = episodeStore.episode.audioURL.isFileURL
+            ? ""
+            : (episodeStore.episode.sourceURL ?? episodeStore.episode.audioURL).absoluteString
+        loadedSourceText = normalizedSourceText(audioURLText)
+        titleText = episodeStore.episode.audioURL.isFileURL ? "" : episodeStore.episode.title
+        transcriptText = episodeStore.episode.transcript ?? ""
+        summaryText = episodeStore.episode.summary ?? ""
+        transcriptExpanded = false
+        showAdditionalPromptsStack = false
+        isLoadingSavedEpisode = false
     }
 
     @MainActor

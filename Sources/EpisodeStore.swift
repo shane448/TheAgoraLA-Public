@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class EpisodeStore: ObservableObject {
     @Published var episode: Episode
+    @Published private(set) var savedEpisodes: [Episode]
 
     private let storageKey = "TheAgoraLA.Episode.Data"
     private static let retiredDemoID = UUID(uuidString: "A60DD4CF-8B21-4A03-9D36-E43EC6C351AE")!
@@ -19,24 +20,37 @@ final class EpisodeStore: ObservableObject {
         return directory.appendingPathComponent("episode.json")
     }
 
+    private static var libraryStorageURL: URL? {
+        storageURL?.deletingLastPathComponent().appendingPathComponent("episode-library.json")
+    }
+
     init() {
+        let loadedEpisode: Episode
         if let url = Self.storageURL,
            let data = try? Data(contentsOf: url),
            let saved = try? JSONDecoder().decode(Episode.self, from: data) {
-            episode = saved
+            loadedEpisode = saved
         } else if let data = UserDefaults.standard.data(forKey: storageKey),
            let saved = try? JSONDecoder().decode(Episode.self, from: data) {
-            episode = saved
-            persist()
+            loadedEpisode = saved
             UserDefaults.standard.removeObject(forKey: storageKey)
         } else {
-            episode = MockEpisodeProvider.sample
+            loadedEpisode = MockEpisodeProvider.sample
+        }
+
+        episode = loadedEpisode
+        if let url = Self.libraryStorageURL,
+           let data = try? Data(contentsOf: url),
+           let saved = try? JSONDecoder().decode([Episode].self, from: data) {
+            savedEpisodes = saved
+        } else {
+            savedEpisodes = []
         }
 
         if episode.id == Self.retiredDemoID {
             episode = MockEpisodeProvider.sample
-            persist()
         }
+        persist()
     }
 
     func updateEpisode(_ updated: Episode) {
@@ -230,10 +244,55 @@ final class EpisodeStore: ObservableObject {
         let data = try JSONEncoder().encode(updated)
         try data.write(to: url, options: .atomic)
         episode = updated
+        syncActiveEpisodeIntoLibrary()
+        persistLibrary()
+    }
+
+    func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) {
+        upsertSavedEpisode(savedEpisode)
+        if makeActive {
+            episode = savedEpisode
+        }
+        persist()
+    }
+
+    @discardableResult
+    func selectEpisode(id: UUID) -> Bool {
+        guard let selected = savedEpisodes.first(where: { $0.id == id }) else { return false }
+        episode = selected
+        persist()
+        return true
+    }
+
+    func deleteSavedEpisode(id: UUID) {
+        guard id != episode.id else { return }
+        savedEpisodes.removeAll { $0.id == id }
+        persistLibrary()
     }
 
     private func persist() {
         guard let url = Self.storageURL, let data = try? JSONEncoder().encode(episode) else { return }
+        try? data.write(to: url, options: .atomic)
+        syncActiveEpisodeIntoLibrary()
+        persistLibrary()
+    }
+
+    private func syncActiveEpisodeIntoLibrary() {
+        guard !episode.audioURL.isFileURL else { return }
+        upsertSavedEpisode(episode)
+    }
+
+    private func upsertSavedEpisode(_ savedEpisode: Episode) {
+        if let index = savedEpisodes.firstIndex(where: { $0.id == savedEpisode.id }) {
+            savedEpisodes[index] = savedEpisode
+        } else {
+            savedEpisodes.insert(savedEpisode, at: 0)
+        }
+    }
+
+    private func persistLibrary() {
+        guard let url = Self.libraryStorageURL,
+              let data = try? JSONEncoder().encode(savedEpisodes) else { return }
         try? data.write(to: url, options: .atomic)
     }
 }

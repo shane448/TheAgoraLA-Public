@@ -1,0 +1,564 @@
+import SwiftUI
+import Foundation
+
+private enum PodcastBacklogStatus: String, Codable {
+    case waiting
+    case resolving
+    case submitting
+    case queued
+    case processing
+    case complete
+    case failed
+
+    var title: String {
+        switch self {
+        case .waiting: return "Ready to submit"
+        case .resolving: return "Finding episode"
+        case .submitting: return "Sending to cloud"
+        case .queued: return "Queued"
+        case .processing: return "Analyzing"
+        case .complete: return "Ready to listen"
+        case .failed: return "Needs attention"
+        }
+    }
+
+    var isActive: Bool {
+        [.resolving, .submitting, .queued, .processing].contains(self)
+    }
+}
+
+private struct PodcastBacklogItem: Identifiable, Codable {
+    let id: UUID
+    let episodeID: UUID
+    let sourceURL: URL
+    var title: String?
+    var audioURL: URL?
+    var feedURL: URL?
+    var episodeGUID: String?
+    var publisherSummary: String?
+    var transcriptURL: URL?
+    var transcriptType: String?
+    var durationSeconds: Double?
+    var jobID: UUID?
+    var status: PodcastBacklogStatus
+    var errorMessage: String?
+    let createdAt: Date
+
+    var displayTitle: String {
+        let cleaned = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return cleaned.isEmpty ? (sourceURL.host ?? "Podcast episode") : cleaned
+    }
+
+    var transcriptSource: PodcastTranscriptSource? {
+        transcriptURL.map { PodcastTranscriptSource(url: $0, type: transcriptType) }
+    }
+}
+
+@MainActor
+private final class PodcastBacklogStore: ObservableObject {
+    @Published private(set) var items: [PodcastBacklogItem]
+    @Published private(set) var isSubmitting = false
+    @Published private(set) var isRefreshing = false
+    @Published var notice = ""
+
+    private static var storageURL: URL? {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else { return nil }
+        let directory = applicationSupport.appendingPathComponent("TheAgoraLA", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("podcast-backlog.json")
+    }
+
+    init() {
+        if let url = Self.storageURL,
+           let data = try? Data(contentsOf: url),
+           let saved = try? JSONDecoder().decode([PodcastBacklogItem].self, from: data) {
+            items = saved
+        } else {
+            items = []
+        }
+    }
+
+    var hasActiveJobs: Bool { items.contains { $0.status.isActive } }
+    var hasStartableItems: Bool { items.contains { $0.status == .waiting || $0.status == .failed } }
+    var completedCount: Int { items.filter { $0.status == .complete }.count }
+
+    func addLinks(from text: String) {
+        let urls = detectedHTTPSLinks(in: text)
+        guard !urls.isEmpty else {
+            notice = "Paste at least one complete podcast link beginning with https://."
+            return
+        }
+        let existing = Set(items.map { normalizedURL($0.sourceURL) })
+        let unique = urls.filter { !existing.contains(normalizedURL($0)) }
+        guard !unique.isEmpty else {
+            notice = "Those podcasts are already in your backlog."
+            return
+        }
+        let availableSlots = max(0, 10 - items.filter { $0.status != .complete }.count)
+        let additions = unique.prefix(availableSlots).map { url in
+            PodcastBacklogItem(
+                id: UUID(),
+                episodeID: UUID(),
+                sourceURL: url,
+                title: nil,
+                audioURL: nil,
+                feedURL: nil,
+                episodeGUID: nil,
+                publisherSummary: nil,
+                transcriptURL: nil,
+                transcriptType: nil,
+                durationSeconds: nil,
+                jobID: nil,
+                status: .waiting,
+                errorMessage: nil,
+                createdAt: Date()
+            )
+        }
+        items.append(contentsOf: additions)
+        persist()
+        if additions.count < unique.count {
+            notice = "Added \(additions.count). Finish or remove queued items before adding more than 10 active episodes."
+        } else {
+            notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s") to the backlog."
+        }
+    }
+
+    func startAll(episodeStore: EpisodeStore) async {
+        guard !isSubmitting else { return }
+        guard CloudAnalysisClient.isConfigured else {
+            notice = "Background analysis needs the Agora cloud service configured in this build."
+            return
+        }
+        guard let providerKey = AIAccountStore.apiKey() else {
+            notice = "Connect your AI account before starting the backlog."
+            return
+        }
+        let ids = items.filter { $0.status == .waiting || $0.status == .failed }.map(\.id)
+        guard !ids.isEmpty else {
+            notice = hasActiveJobs ? "Your backlog is already running in the cloud." : "Add podcast links to begin."
+            return
+        }
+
+        isSubmitting = true
+        notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
+        defer { isSubmitting = false }
+
+        for start in stride(from: 0, to: ids.count, by: 3) {
+            let end = min(start + 3, ids.count)
+            let tasks = ids[start..<end].map { id in
+                Task { await self.submit(id: id, providerKey: providerKey) }
+            }
+            for task in tasks { await task.value }
+        }
+        await refreshAll(episodeStore: episodeStore)
+        let failures = items.filter { $0.status == .failed }.count
+        notice = failures == 0
+            ? "Backlog submitted. You can leave the app while the cloud finishes."
+            : "The cloud accepted the available episodes. Review any item marked Needs attention."
+    }
+
+    func refreshAll(episodeStore: EpisodeStore) async {
+        guard !isRefreshing, CloudAnalysisClient.isConfigured else { return }
+        let pendingIDs = items.filter { $0.jobID != nil && ($0.status == .queued || $0.status == .processing) }.map(\.id)
+        guard !pendingIDs.isEmpty else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        for id in pendingIDs {
+            guard let item = item(with: id), let jobID = item.jobID, let audioURL = item.audioURL else { continue }
+            do {
+                let snapshot = try await CloudAnalysisClient().status(
+                    for: PendingCloudAnalysis(jobID: jobID, expectedAudioURL: audioURL)
+                )
+                switch snapshot.state {
+                case .queued:
+                    update(id) { $0.status = .queued }
+                case .processing:
+                    update(id) { $0.status = .processing }
+                case .failed:
+                    update(id) {
+                        $0.status = .failed
+                        $0.errorMessage = snapshot.errorMessage ?? "Cloud analysis could not finish this episode."
+                    }
+                case .complete:
+                    guard let analysis = snapshot.analysis else {
+                        throw CloudAnalysisError.invalidResponse
+                    }
+                    let completed = Episode(
+                        id: item.episodeID,
+                        title: item.displayTitle,
+                        audioURL: audioURL,
+                        sourceURL: item.sourceURL,
+                        prompts: analysis.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds },
+                        feedURL: item.feedURL,
+                        episodeGUID: item.episodeGUID,
+                        transcript: analysis.transcript,
+                        summary: analysis.summary
+                    )
+                    episodeStore.saveEpisode(completed)
+                    update(id) {
+                        $0.status = .complete
+                        $0.errorMessage = nil
+                    }
+                }
+            } catch {
+                if let urlError = error as? URLError,
+                   [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains(urlError.code) {
+                    continue
+                }
+                update(id) {
+                    $0.errorMessage = "Status will refresh when the cloud is reachable. \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func retry(_ id: UUID) {
+        update(id) {
+            $0.status = .waiting
+            $0.jobID = nil
+            $0.errorMessage = nil
+        }
+    }
+
+    func remove(_ id: UUID) {
+        items.removeAll { $0.id == id }
+        persist()
+    }
+
+    private func submit(id: UUID, providerKey: String) async {
+        guard let original = item(with: id) else { return }
+        update(id) {
+            $0.status = .resolving
+            $0.errorMessage = nil
+        }
+        do {
+            let imported = try await PodcastImportService().importMetadata(from: original.sourceURL)
+            update(id) {
+                $0.title = imported.title
+                $0.audioURL = imported.audioURL
+                $0.feedURL = imported.feedURL
+                $0.episodeGUID = imported.episodeGUID
+                $0.publisherSummary = imported.publisherSummary
+                $0.transcriptURL = imported.transcriptSource?.url
+                $0.transcriptType = imported.transcriptSource?.type
+                $0.durationSeconds = imported.durationSeconds
+                $0.status = .submitting
+            }
+            let duration = imported.durationSeconds
+            let count = automaticPromptCount(duration: duration)
+            let pending = try await CloudAnalysisClient().submit(
+                title: imported.title,
+                audioURL: imported.audioURL,
+                transcript: nil,
+                transcriptSource: imported.transcriptSource,
+                duration: duration,
+                promptCount: count,
+                model: AIAccountStore.selectedModelID(),
+                providerAPIKey: providerKey
+            )
+            update(id) {
+                $0.jobID = pending.jobID
+                $0.status = .queued
+                $0.errorMessage = nil
+            }
+        } catch {
+            update(id) {
+                $0.status = .failed
+                $0.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func automaticPromptCount(duration: Double?) -> Int {
+        guard let duration, duration.isFinite, duration > 10 else { return 5 }
+        return min(12, max(3, Int((duration / 900).rounded(.up)) + 2))
+    }
+
+    private func item(with id: UUID) -> PodcastBacklogItem? {
+        items.first { $0.id == id }
+    }
+
+    private func update(_ id: UUID, change: (inout PodcastBacklogItem) -> Void) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        var updated = items[index]
+        change(&updated)
+        items[index] = updated
+        persist()
+    }
+
+    private func persist() {
+        guard let url = Self.storageURL, let data = try? JSONEncoder().encode(items) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func detectedHTTPSLinks(in text: String) -> [URL] {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var seen = Set<String>()
+        var urls: [URL] = []
+        detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            guard let url = match?.url,
+                  url.scheme?.lowercased() == "https",
+                  url.host != nil else { return }
+            let key = normalizedURL(url)
+            guard seen.insert(key).inserted else { return }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    private func normalizedURL(_ url: URL) -> String {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return (components?.url ?? url).absoluteString.lowercased()
+    }
+}
+
+struct PodcastBacklogView: View {
+    @ObservedObject var episodeStore: EpisodeStore
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var aiAccount: AIAccountStore
+    @StateObject private var backlog = PodcastBacklogStore()
+    @State private var linkText = ""
+    @State private var showAIAccount = false
+
+    var body: some View {
+        ZStack {
+            AgoraBackgroundView()
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    header
+                    introductionCard
+                    addLinksCard
+                    backlogControls
+
+                    if backlog.items.isEmpty {
+                        emptyCard
+                    } else {
+                        ForEach(backlog.items) { item in
+                            PodcastBacklogRow(
+                                item: item,
+                                isSelected: episodeStore.episode.id == item.episodeID,
+                                onUse: {
+                                    if episodeStore.selectEpisode(id: item.episodeID) { dismiss() }
+                                },
+                                onRetry: { backlog.retry(item.id) },
+                                onRemove: {
+                                    if item.status == .complete {
+                                        episodeStore.deleteSavedEpisode(id: item.episodeID)
+                                    }
+                                    backlog.remove(item.id)
+                                }
+                            )
+                        }
+                    }
+                }
+                .padding(16)
+                .padding(.vertical, 8)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await backlog.refreshAll(episodeStore: episodeStore)
+                try? await Task.sleep(nanoseconds: backlog.hasActiveJobs ? 8_000_000_000 : 15_000_000_000)
+            }
+        }
+        .sheet(isPresented: $showAIAccount) {
+            AIAccountView()
+                .environmentObject(aiAccount)
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Podcast Backlog")
+                    .font(AgoraTheme.cardValueFont)
+                    .foregroundColor(AgoraTheme.ink)
+                Text("Prepare several episodes while you do something else.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+            }
+            Spacer()
+            Button("Done") { dismiss() }
+                .buttonStyle(AgoraOutlineButtonStyle())
+        }
+    }
+
+    private var introductionCard: some View {
+        AgoraCard {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "cloud.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(AgoraTheme.accent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Cloud preparation continues")
+                        .font(AgoraTheme.cardTitleFont)
+                        .foregroundColor(AgoraTheme.ink)
+                    Text("Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode.")
+                        .font(AgoraTheme.bodyFont)
+                        .foregroundColor(AgoraTheme.inkMuted)
+                }
+            }
+        }
+    }
+
+    private var addLinksCard: some View {
+        AgoraCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add Podcast Links")
+                    .font(AgoraTheme.cardTitleFont)
+                    .foregroundColor(AgoraTheme.ink)
+                Text("Paste up to 10 episode or show links from Apple Podcasts, Spotify, or another supported podcast service. Put each link on its own line.")
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+                TextEditor(text: $linkText)
+                    .font(AgoraTheme.bodyFont)
+                    .frame(minHeight: 110)
+                    .padding(10)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.white.opacity(0.88))
+                    .cornerRadius(14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+                    )
+                Button("Add to Backlog") {
+                    backlog.addLinks(from: linkText)
+                    if backlog.notice.hasPrefix("Added") { linkText = "" }
+                }
+                .buttonStyle(AgoraOutlineButtonStyle())
+            }
+        }
+    }
+
+    private var backlogControls: some View {
+        AgoraCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(backlog.completedCount) ready · \(backlog.items.count) total")
+                            .font(AgoraTheme.cardTitleFont)
+                            .foregroundColor(AgoraTheme.ink)
+                        Text(backlog.notice.isEmpty ? "The strongest final AI review is used for every episode." : backlog.notice)
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                    }
+                    Spacer()
+                    if backlog.isRefreshing { ProgressView() }
+                }
+
+                if !aiAccount.isConnected {
+                    Button("Connect Your AI") { showAIAccount = true }
+                        .buttonStyle(AgoraOutlineButtonStyle())
+                }
+
+                Button(backlog.hasActiveJobs ? "Add Remaining to Running Backlog" : "Analyze Backlog") {
+                    if aiAccount.isConnected {
+                        Task { await backlog.startAll(episodeStore: episodeStore) }
+                    } else {
+                        showAIAccount = true
+                    }
+                }
+                .buttonStyle(AgoraPillButtonStyle())
+                .disabled(backlog.isSubmitting || !backlog.hasStartableItems)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var emptyCard: some View {
+        AgoraCard {
+            VStack(spacing: 10) {
+                Image(systemName: "text.badge.plus")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundColor(AgoraTheme.accent)
+                Text("Your backlog is empty")
+                    .font(AgoraTheme.cardTitleFont)
+                    .foregroundColor(AgoraTheme.ink)
+                Text("Add several podcast links above, then start them with one button.")
+                    .font(AgoraTheme.bodyFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct PodcastBacklogRow: View {
+    let item: PodcastBacklogItem
+    let isSelected: Bool
+    let onUse: () -> Void
+    let onRetry: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        AgoraCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    statusIcon
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.displayTitle)
+                            .font(AgoraTheme.cardTitleFont)
+                            .foregroundColor(AgoraTheme.ink)
+                        Text(item.status.title)
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(item.status == .failed ? Color.red : AgoraTheme.accent)
+                    }
+                    Spacer()
+                    if isSelected { AgoraTag(text: "Selected") }
+                }
+
+                Text(item.sourceURL.absoluteString)
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+                    .lineLimit(2)
+
+                if let error = item.errorMessage, !error.isEmpty {
+                    AgoraExpandableText(
+                        text: error,
+                        collapsedLineLimit: 2,
+                        expansionThreshold: 120,
+                        font: AgoraTheme.tagFont,
+                        color: AgoraTheme.inkMuted
+                    )
+                }
+
+                HStack {
+                    if item.status == .complete {
+                        Button(isSelected ? "Currently Selected" : "Use This Episode", action: onUse)
+                            .buttonStyle(AgoraPillButtonStyle())
+                            .disabled(isSelected)
+                    } else if item.status == .failed {
+                        Button("Retry", action: onRetry)
+                            .buttonStyle(AgoraOutlineButtonStyle())
+                    }
+                    Spacer()
+                    if !item.status.isActive && !isSelected {
+                        Button(role: .destructive, action: onRemove) {
+                            Label("Remove", systemImage: "trash")
+                        }
+                        .font(AgoraTheme.buttonFont)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        if item.status.isActive {
+            ProgressView()
+                .tint(AgoraTheme.accent)
+        } else {
+            Image(systemName: item.status == .complete ? "checkmark.circle.fill" : item.status == .failed ? "exclamationmark.triangle.fill" : "clock.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(item.status == .failed ? .red : AgoraTheme.accent)
+        }
+    }
+}

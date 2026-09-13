@@ -8,6 +8,7 @@ This service runs long podcast transcription and prompt generation outside the i
 - Audio is downloaded by the server, split only when needed, and transcribed concurrently while preserving episode order.
 - Transcript sections are scanned concurrently by the extraction model. Exact quotes are validated against the full transcript before one high-reasoning curation pass selects the final summary and prompts.
 - `TRANSCRIPTION_CONCURRENCY` and `ANALYSIS_CONCURRENCY` bound parallel requests so deployments can tune latency without weakening quality checks.
+- `JOB_WORKER_CONCURRENCY` lets a small number of backlog episodes advance together while preserving the full quality pipeline for each one.
 
 ## Privacy and billing
 

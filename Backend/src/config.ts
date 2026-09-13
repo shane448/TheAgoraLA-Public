@@ -23,6 +23,7 @@ const environmentSchema = z.object({
   MAX_AUDIO_BYTES: z.coerce.number().int().positive().default(262_144_000),
   TRANSCRIPTION_CONCURRENCY: z.coerce.number().int().min(1).max(6).default(3),
   ANALYSIS_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(4),
+  JOB_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
   JOB_RETENTION_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   OPENAI_EXTRACTION_MODEL: z.string().default("openai/gpt-5.6-terra"),
   OPENAI_CURATION_MODEL: z.string().default("openai/gpt-6-astra"),
@@ -72,6 +73,7 @@ export function loadConfig() {
     maxAudioBytes: env.MAX_AUDIO_BYTES,
     transcriptionConcurrency: env.TRANSCRIPTION_CONCURRENCY,
     analysisConcurrency: env.ANALYSIS_CONCURRENCY,
+    jobWorkerConcurrency: env.JOB_WORKER_CONCURRENCY,
     jobRetentionDays: env.JOB_RETENTION_DAYS,
     models: {
       extraction: env.OPENAI_EXTRACTION_MODEL,

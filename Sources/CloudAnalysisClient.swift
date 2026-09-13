@@ -22,6 +22,19 @@ struct PendingCloudAnalysis: Codable {
     let expectedAudioURL: URL
 }
 
+enum CloudAnalysisJobState: String {
+    case queued
+    case processing
+    case complete
+    case failed
+}
+
+struct CloudAnalysisJobSnapshot {
+    let state: CloudAnalysisJobState
+    let analysis: EpisodeAnalysisResult?
+    let errorMessage: String?
+}
+
 struct CloudAnalysisClient {
     private static let installationKey = "TheAgoraLA.Cloud.InstallationID"
     private static let sessionKey = "TheAgoraLA.Cloud.SessionToken"
@@ -54,6 +67,32 @@ struct CloudAnalysisClient {
         progress: @escaping (String) -> Void
     ) async throws -> (EpisodeAnalysisResult, URL, UUID) {
         progress("Securely sending the episode to cloud analysis...")
+        let pending = try await submit(
+            title: title,
+            audioURL: audioURL,
+            transcript: transcript,
+            transcriptSource: transcriptSource,
+            duration: duration,
+            promptCount: promptCount,
+            model: model,
+            providerAPIKey: providerAPIKey,
+            rememberAsCurrent: true
+        )
+        progress("Cloud analysis is running. You can safely leave the app and return later.")
+        return (try await waitForCompletion(pending, progress: progress), audioURL, pending.jobID)
+    }
+
+    func submit(
+        title: String,
+        audioURL: URL,
+        transcript: String?,
+        transcriptSource: PodcastTranscriptSource?,
+        duration: Double?,
+        promptCount: Int,
+        model: String,
+        providerAPIKey: String,
+        rememberAsCurrent: Bool = false
+    ) async throws -> PendingCloudAnalysis {
         var body: [String: Any] = [
             "title": title,
             "audio_url": audioURL.absoluteString,
@@ -73,15 +112,27 @@ struct CloudAnalysisClient {
         let data = try await authorizedRequest(path: "v1/episode-jobs", method: "POST", body: body)
         let job = try JSONDecoder().decode(JobEnvelope.self, from: data)
         let pending = PendingCloudAnalysis(jobID: job.id, expectedAudioURL: audioURL)
-        Self.savePending(pending)
-        progress("Cloud analysis is running. You can safely leave the app and return later.")
-        return (try await waitForCompletion(pending, progress: progress), audioURL, pending.jobID)
+        if rememberAsCurrent { Self.savePending(pending) }
+        return pending
     }
 
     func resumePending(progress: @escaping (String) -> Void) async throws -> (EpisodeAnalysisResult, URL, UUID)? {
         guard let pending = Self.pendingAnalysis else { return nil }
         progress("Reconnecting to your cloud analysis...")
         return (try await waitForCompletion(pending, progress: progress), pending.expectedAudioURL, pending.jobID)
+    }
+
+    func status(for pending: PendingCloudAnalysis) async throws -> CloudAnalysisJobSnapshot {
+        let data = try await authorizedRequest(path: "v1/episode-jobs/\(pending.jobID.uuidString)", method: "GET")
+        let job = try JSONDecoder().decode(JobEnvelope.self, from: data)
+        guard let state = CloudAnalysisJobState(rawValue: job.status) else {
+            throw CloudAnalysisError.invalidResponse
+        }
+        return CloudAnalysisJobSnapshot(
+            state: state,
+            analysis: job.result?.episodeAnalysis,
+            errorMessage: job.error
+        )
     }
 
     private func waitForCompletion(
@@ -91,19 +142,18 @@ struct CloudAnalysisClient {
         var pollDelayNanoseconds: UInt64 = 2_000_000_000
         while true {
             try Task.checkCancellation()
-            let data = try await authorizedRequest(path: "v1/episode-jobs/\(pending.jobID.uuidString)", method: "GET")
-            let job = try JSONDecoder().decode(JobEnvelope.self, from: data)
-            switch job.status {
-            case "complete":
-                guard let result = job.result else { throw CloudAnalysisError.invalidResponse }
+            let snapshot = try await status(for: pending)
+            switch snapshot.state {
+            case .complete:
+                guard let analysis = snapshot.analysis else { throw CloudAnalysisError.invalidResponse }
                 progress("Cloud analysis complete.")
-                return result.episodeAnalysis
-            case "failed":
+                return analysis
+            case .failed:
                 Self.clearPending()
-                throw CloudAnalysisError.service(job.error ?? "Cloud analysis could not finish this episode.")
-            case "processing":
+                throw CloudAnalysisError.service(snapshot.errorMessage ?? "Cloud analysis could not finish this episode.")
+            case .processing:
                 progress("Transcribing and analyzing the complete episode in the cloud. You can leave the app.")
-            default:
+            case .queued:
                 progress("Your episode is queued in the cloud. You can leave the app.")
             }
             try await Task.sleep(nanoseconds: pollDelayNanoseconds)
