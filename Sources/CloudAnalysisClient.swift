@@ -61,7 +61,7 @@ struct CloudAnalysisClient {
         transcript: String?,
         transcriptSource: PodcastTranscriptSource?,
         duration: Double?,
-        promptCount: Int,
+        promptCount: Int?,
         model: String,
         providerAPIKey: String,
         progress: @escaping (String) -> Void
@@ -88,7 +88,7 @@ struct CloudAnalysisClient {
         transcript: String?,
         transcriptSource: PodcastTranscriptSource?,
         duration: Double?,
-        promptCount: Int,
+        promptCount: Int?,
         model: String,
         providerAPIKey: String,
         rememberAsCurrent: Bool = false
@@ -96,10 +96,12 @@ struct CloudAnalysisClient {
         var body: [String: Any] = [
             "title": title,
             "audio_url": audioURL.absoluteString,
-            "prompt_count": min(max(promptCount, 3), 12),
             "model": model,
             "provider_api_key": providerAPIKey,
         ]
+        if let promptCount {
+            body["prompt_count"] = min(max(promptCount, 3), 12)
+        }
         if let transcript, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             body["transcript"] = transcript
         } else if let transcriptSource {

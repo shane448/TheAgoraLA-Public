@@ -249,14 +249,13 @@ private final class PodcastBacklogStore: ObservableObject {
                 $0.status = .submitting
             }
             let duration = imported.durationSeconds
-            let count = automaticPromptCount(duration: duration)
             let pending = try await CloudAnalysisClient().submit(
                 title: imported.title,
                 audioURL: imported.audioURL,
                 transcript: nil,
                 transcriptSource: imported.transcriptSource,
                 duration: duration,
-                promptCount: count,
+                promptCount: nil,
                 model: AIAccountStore.selectedModelID(),
                 providerAPIKey: providerKey
             )
@@ -271,11 +270,6 @@ private final class PodcastBacklogStore: ObservableObject {
                 $0.errorMessage = error.localizedDescription
             }
         }
-    }
-
-    private func automaticPromptCount(duration: Double?) -> Int {
-        guard let duration, duration.isFinite, duration > 10 else { return 5 }
-        return min(12, max(3, Int((duration / 900).rounded(.up)) + 2))
     }
 
     private func item(with id: UUID) -> PodcastBacklogItem? {

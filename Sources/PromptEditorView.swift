@@ -508,8 +508,7 @@ struct PromptEditorView: View {
         do {
             guard let providerKey = AIAccountStore.apiKey() else { throw OpenRouterClientError.notConnected }
             let duration = imported.durationSeconds ?? estimateDurationFromTranscript(preferredTranscript ?? "")
-            let automaticCount = min(12, max(3, Int((duration / 900).rounded(.up)) + 2))
-            let count = promptCountMode == .manual ? selectedPromptCount : automaticCount
+            let count: Int? = promptCountMode == .manual ? selectedPromptCount : nil
             let (analysis, expectedURL, completedJobID) = try await CloudAnalysisClient().submitAndWait(
                 title: titleText,
                 audioURL: imported.audioURL,

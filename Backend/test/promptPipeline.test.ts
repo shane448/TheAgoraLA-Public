@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateAndRankPrompts, type EpisodePrompt } from "../src/promptPipeline.js";
+import { selectDistributedPrompts, validateAndRankPrompts, type EpisodePrompt } from "../src/promptPipeline.js";
 
 const evidence = "The host argues that attention is a form of respect because it allows another person's reasoning to change your mind.";
 const transcript = `${evidence} Later, the guest distinguishes passive hearing from active listening by requiring the listener to reconstruct the argument before responding.`;
@@ -56,5 +56,53 @@ describe("prompt quality gates", () => {
       prompt({ expected_answer: "The episode recommends buying specialized running shoes before beginning marathon training." }),
     ], transcript, 120);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe("prompt distribution", () => {
+  it("spreads similarly strong learning moments instead of clustering them", () => {
+    const candidates = [
+      prompt({
+        time: 60,
+        question: "Why is attentive listening described as respect for another person's reasoning?",
+        expected_answer: "Attentive listening shows respect by treating another person's reasoning as worthy of serious consideration.",
+      }),
+      prompt({
+        time: 72,
+        question: "How can attention allow another person's reasoning to alter a listener's view?",
+        expected_answer: "Attention leaves the listener genuinely open to changing a prior belief when the other person's reasoning warrants it.",
+      }),
+      prompt({
+        time: 310,
+        question: "What distinction does the guest draw between passive hearing and reconstructing an argument?",
+        expected_answer: "Passive hearing merely receives words, while active listening reconstructs the speaker's argument before judging it.",
+      }),
+      prompt({
+        time: 560,
+        question: "Why does the concluding argument require listeners to reconstruct reasoning before responding?",
+        expected_answer: "The conclusion says listeners should understand the complete chain of reasoning before they formulate a response.",
+      }),
+    ];
+    const selected = selectDistributedPrompts(candidates, 3, 600);
+    expect(selected.map((item) => item.time)).toEqual([60, 310, 560]);
+  });
+
+  it("keeps a substantially more important moment even when it is near another question", () => {
+    const strongest = prompt({ time: 70 });
+    const nearby = prompt({
+      time: 80,
+      question: "How does focused attention let a listener reconstruct this particular argument?",
+      expected_answer: "Focused attention preserves each premise so the listener can reconstruct the argument accurately before responding.",
+      scores: { overall: 0.99, importance_to_listener: 0.99, episode_specificity: 0.99, answer_alignment: 0.99, grounding: 0.99 },
+    });
+    const distant = prompt({
+      time: 500,
+      question: "What later listening example illustrates the episode's secondary observation?",
+      expected_answer: "The later example briefly notes that a listener can remember a speaker's words without understanding their reasoning.",
+      scores: { overall: 0.72, importance_to_listener: 0.72, episode_specificity: 0.72, answer_alignment: 0.72, grounding: 0.72 },
+    });
+    const selected = selectDistributedPrompts([strongest, nearby, distant], 2, 600);
+    expect(selected).toContain(nearby);
+    expect(selected).not.toContain(distant);
   });
 });

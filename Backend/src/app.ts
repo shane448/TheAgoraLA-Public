@@ -33,7 +33,7 @@ const analysisJobSchema = z.object({
   transcript_url: z.string().url().startsWith("https://").max(2_000).optional(),
   transcript_type: z.string().trim().max(120).optional(),
   duration: z.number().positive().max(86_400).optional(),
-  prompt_count: z.number().int().min(3).max(12).default(5),
+  prompt_count: z.number().int().min(3).max(12).optional(),
   model: z.string().trim().min(3).max(150).optional(),
   provider_api_key: z.string().trim().startsWith("sk-or-").max(500),
 }).refine(
@@ -49,7 +49,7 @@ const scoreSchema = z.object({
 });
 
 const publicDirectory = new URL("../public/", import.meta.url);
-const analysisPipelineVersion = "2026-09-12.1";
+const analysisPipelineVersion = "2026-09-13.1";
 
 interface AnalysisJobRow {
   id: string;
@@ -274,7 +274,7 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
       transcript_url: input.transcript_url ?? null,
       transcript_type: input.transcript_type ?? null,
       duration: input.duration ?? null,
-      prompt_count: input.prompt_count,
+      prompt_count: input.prompt_count ?? null,
       model: input.model ?? null,
     })).digest("hex");
     const jobID = randomUUID();

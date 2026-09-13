@@ -276,7 +276,11 @@ final class AIService {
             count: min(20, max(8, requestedCount * 2)),
             learningPlan: learningPlan
         )
-        let selected = selectBestCandidates(candidates, desiredCount: requestedCount)
+        let selected = selectBestCandidates(
+            candidates,
+            desiredCount: requestedCount,
+            duration: duration
+        )
         guard !selected.isEmpty else { throw AIServiceError.noQualityPrompts }
         return selected.sorted { $0.timestampSeconds < $1.timestampSeconds }
     }
@@ -360,13 +364,17 @@ final class AIService {
             recommendedPromptCount: editorial.recommendedPromptCount,
             priorities: editorial.priorities
         )
-        let recommendedCount = automaticPromptCount(duration: duration, learningPlan: learningPlan)
+        let recommendedCount = automaticPromptCount(learningPlan: learningPlan)
         let requestedCount = desiredCount.map { max(3, min(12, $0)) } ?? recommendedCount
         progress("Verifying evidence and selecting the strongest questions...")
         let validated = editorial.prompts.compactMap {
             validate($0, transcript: resolvedTranscript, duration: duration)
         }
-        let promptValues = selectBestCandidates(validated, desiredCount: requestedCount)
+        let promptValues = selectBestCandidates(
+            validated,
+            desiredCount: requestedCount,
+            duration: duration
+        )
         guard !promptValues.isEmpty else { throw AIServiceError.noQualityPrompts }
         let summaryValue = editorial.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard wordCount(summaryValue) >= 30 else { throw AIServiceError.invalidResponse }
@@ -387,7 +395,7 @@ final class AIService {
     ) async throws -> EpisodeAnalysisResult {
         async let summaryTask = personalAI.summarize(transcript: transcript)
         let learningPlan = try await personalAI.analyzeLearningPlan(transcript: transcript, duration: duration)
-        let recommendedCount = automaticPromptCount(duration: duration, learningPlan: learningPlan)
+        let recommendedCount = automaticPromptCount(learningPlan: learningPlan)
         let requestedCount = desiredCount.map { max(3, min(12, $0)) } ?? recommendedCount
         async let promptsTask = generatePersonalPrompts(
             transcript: transcript,
@@ -443,7 +451,11 @@ final class AIService {
             count: min(20, max(8, requestedCount * 2)),
             learningPlan: learningPlan
         )
-        let selected = selectBestCandidates(candidates, desiredCount: requestedCount)
+        let selected = selectBestCandidates(
+            candidates,
+            desiredCount: requestedCount,
+            duration: duration
+        )
         guard !selected.isEmpty else { throw AIServiceError.noQualityPrompts }
         return selected.sorted { $0.timestampSeconds < $1.timestampSeconds }
     }
@@ -552,72 +564,62 @@ final class AIService {
 
     private func selectBestCandidates(
         _ candidates: [ValidatedCandidate],
-        desiredCount: Int
+        desiredCount: Int,
+        duration: Double
     ) -> [Prompt] {
-        let sorted = candidates.sorted { left, right in
-            if abs(left.score - right.score) < 0.0001 {
-                return left.prompt.timestampSeconds < right.prompt.timestampSeconds
-            }
-            return left.score > right.score
-        }
-
         var selected: [ValidatedCandidate] = []
-        for candidate in sorted {
-            if selected.count >= desiredCount { break }
-            let coversNewPriority = candidate.priorityID.map { id in
-                !selected.contains(where: { $0.priorityID == id })
-            } ?? true
-            let isDistinct = selected.allSatisfy { existing in
-                jaccardSimilarity(
-                    meaningfulTokens(existing.prompt.question),
-                    meaningfulTokens(candidate.prompt.question)
-                ) < 0.68 && jaccardSimilarity(
-                    meaningfulTokens(existing.prompt.expectedAnswer),
-                    meaningfulTokens(candidate.prompt.expectedAnswer)
-                ) < 0.76
-            }
-            if coversNewPriority && isDistinct { selected.append(candidate) }
-        }
+        var remaining = candidates
+        let idealSpacing = max(duration / Double(max(desiredCount + 1, 2)), 30)
 
-        if selected.count < desiredCount {
-            for candidate in sorted where !selected.contains(where: { $0.prompt.id == candidate.prompt.id }) {
-                if selected.count >= desiredCount { break }
-                let isDistinct = selected.allSatisfy { existing in
+        while selected.count < desiredCount, !remaining.isEmpty {
+            let distinct = remaining.filter { candidate in
+                selected.allSatisfy { existing in
                     jaccardSimilarity(
                         meaningfulTokens(existing.prompt.question),
                         meaningfulTokens(candidate.prompt.question)
-                    ) < 0.68
+                    ) < 0.68 && jaccardSimilarity(
+                        meaningfulTokens(existing.prompt.expectedAnswer),
+                        meaningfulTokens(candidate.prompt.expectedAnswer)
+                    ) < 0.76
                 }
-                if isDistinct { selected.append(candidate) }
             }
+            guard let highestQuality = distinct.map(\.score).max() else { break }
+
+            // Timing helps choose among comparable ideas, but never displaces a clearly better question.
+            let comparable = distinct.filter { $0.score >= highestQuality - 0.08 }
+            guard let best = comparable.max(by: { left, right in
+                selectionScore(left, selected: selected, idealSpacing: idealSpacing)
+                    < selectionScore(right, selected: selected, idealSpacing: idealSpacing)
+            }) else { break }
+
+            selected.append(best)
+            remaining.removeAll { $0.prompt.id == best.prompt.id }
         }
         return selected.map(\.prompt)
     }
 
-    private func automaticPromptCount(duration: Double, learningPlan: EpisodeLearningPlan) -> Int {
-        let minutes = duration / 60
-        let durationCount: Int
-        switch minutes {
-        case ..<15: durationCount = 3
-        case ..<30: durationCount = 4
-        case ..<45: durationCount = 5
-        case ..<60: durationCount = 6
-        case ..<90: durationCount = 8
-        case ..<120: durationCount = 10
-        default: durationCount = 12
-        }
+    private func selectionScore(
+        _ candidate: ValidatedCandidate,
+        selected: [ValidatedCandidate],
+        idealSpacing: Double
+    ) -> Double {
+        guard !selected.isEmpty else { return candidate.score }
+        let nearestDistance = selected
+            .map { abs($0.prompt.timestampSeconds - candidate.prompt.timestampSeconds) }
+            .min() ?? idealSpacing
+        let temporalNovelty = min(nearestDistance / idealSpacing, 1)
+        let coversNewPriority = candidate.priorityID.map { id in
+            !selected.contains { $0.priorityID == id }
+        } ?? true
+        return (candidate.score * 0.82)
+            + (temporalNovelty * 0.13)
+            + (coversNewPriority ? 0.05 : 0)
+    }
 
+    private func automaticPromptCount(learningPlan: EpisodeLearningPlan) -> Int {
         let modelCount = max(3, min(12, learningPlan.recommendedPromptCount))
-        let depthAdjustment: Int
-        switch learningPlan.contentDepthScore {
-        case 0.82...: depthAdjustment = 2
-        case 0.65..<0.82: depthAdjustment = 1
-        case ..<0.38: depthAdjustment = -1
-        default: depthAdjustment = 0
-        }
-        let blended = Int((Double(durationCount + modelCount) / 2).rounded()) + depthAdjustment
         let priorityCap = max(3, min(12, learningPlan.priorities.count))
-        return max(3, min(priorityCap, blended))
+        return min(modelCount, priorityCap)
     }
 
     private func decodeGeneratedPrompts(from data: Data) -> [GeneratedPrompt] {

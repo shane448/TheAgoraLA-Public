@@ -142,9 +142,13 @@ final class OpenRouterClient: @unchecked Sendable {
             .sorted { $0.importance > $1.importance }
         guard ideas.count >= 3 else { throw OpenRouterClientError.invalidResponse }
 
-        let automaticCount = max(3, min(12, Int((duration / 900).rounded(.up)) + min(ideas.count / 4, 4)))
-        let requestedCount = max(3, min(12, desiredCount ?? automaticCount))
-        let candidateCount = min(18, ideas.count, max(8, requestedCount * 2))
+        let requestedCount = desiredCount.map { max(3, min(12, $0)) }
+        let automaticCandidateCount = max(10, min(18, Int((duration / 600).rounded(.up)) + 6))
+        let candidateCount = min(
+            18,
+            ideas.count,
+            requestedCount.map { max(8, $0 * 2) } ?? automaticCandidateCount
+        )
         let encodedIdeas = try String(data: JSONEncoder().encode(ideas), encoding: .utf8) ?? "[]"
         return try await curateEpisode(
             ideasJSON: encodedIdeas,
@@ -209,7 +213,7 @@ final class OpenRouterClient: @unchecked Sendable {
     private func curateEpisode(
         ideasJSON: String,
         duration: Double,
-        requestedCount: Int,
+        requestedCount: Int?,
         candidateCount: Int
     ) async throws -> Data {
         let prioritySchema: [String: Any] = [
@@ -256,19 +260,24 @@ final class OpenRouterClient: @unchecked Sendable {
             "properties": [
                 "summary": ["type": "string"],
                 "content_depth_score": scoreNumberSchema,
-                "recommended_prompt_count": ["type": "integer", "minimum": 3, "maximum": 12],
+                "recommended_prompt_count": ["type": "integer", "minimum": 3, "maximum": min(12, candidateCount)],
                 "priorities": ["type": "array", "minItems": 3, "maxItems": 15, "items": prioritySchema],
                 "prompts": ["type": "array", "minItems": candidateCount, "maxItems": candidateCount, "items": promptSchema],
             ],
         ]
+        let countInstruction = requestedCount.map {
+            "Use the listener's manual final count of \($0) prompts."
+        } ?? "Choose the final prompt count from the episode's actual learning density."
         return try await structuredCompletion(
             name: "complete_episode_editorial_selection",
             system: """
-            You are the senior learning editor for a podcast listening app. Compare evidence from every section before selecting the episode's most consequential ideas. Write a precise 100-170 word summary and difficult but fair recall questions that test attentive listening. Questions must name distinctive people, concepts, arguments, examples, events, or causal claims from this episode. Expected answers must directly answer their exact question using only supplied podcast evidence. Reject stock questions, opinions, trivia, ads, vague summaries, and repeated ideas. Set each prompt time after the latest evidence needed to answer it. Set passes_quality_gates true only when every score is at least 0.78.
+            You are the senior learning editor for a podcast listening app. Compare evidence from every section before selecting the episode's most consequential ideas. Write a precise 100-170 word summary and difficult but fair recall questions that test attentive listening. Questions must name distinctive people, concepts, arguments, examples, events, or causal claims from this episode. Expected answers must directly answer their exact question using only supplied podcast evidence. Reject stock questions, opinions, trivia, ads, vague summaries, and repeated ideas.
+
+            Recommend the final number of prompts from episode length, conceptual density, complexity, and the number of genuinely important learning moments. Dense or difficult episodes should receive more prompts; light or repetitive episodes should receive fewer. Choose the strongest key moments first. When important moments are similarly valuable, distribute them regularly through the beginning, middle, and end rather than concentrating them in one passage. Never force even spacing, invent filler, or choose a weaker idea solely to fill a time region. Set each prompt time after the latest evidence needed to answer it. Set passes_quality_gates true only when every score is at least 0.78.
             """,
             user: """
             Episode duration: \(Int(duration)) seconds.
-            Requested final prompts: \(requestedCount). Return exactly \(candidateCount) ranked candidates so local quality checks can keep only the best.
+            \(countInstruction) Return exactly \(candidateCount) ranked candidates so local quality checks can keep only the best.
 
             VERIFIED EVIDENCE FROM THE COMPLETE EPISODE:
             \(ideasJSON)
@@ -285,12 +294,12 @@ final class OpenRouterClient: @unchecked Sendable {
         let system = """
         You are the lead curriculum editor for a serious podcast learning product. Read the complete transcript before making decisions. First separate the episode's consequential teaching from ads, introductions, asides, repeated phrasing, and trivia. Then rank the smallest set of ideas a careful listener should retain to genuinely understand the episode.
 
-        Judge depth based on the number of distinct consequential ideas, how much reasoning connects them, and whether the episode develops difficult distinctions, mechanisms, evidence, or arguments. Every priority must be episode-specific and supported by an exact transcript quote. Recommend enough prompts for durable learning without manufacturing filler.
+        Judge depth based on the number of distinct consequential ideas, how much reasoning connects them, and whether the episode develops difficult distinctions, mechanisms, evidence, or arguments. Every priority must be episode-specific and supported by an exact transcript quote. Recommend enough prompts for durable learning without manufacturing filler. Identify the strongest key moments first; when important ideas are similarly valuable, favor a regular spread through the beginning, middle, and end. Never lower the content-quality bar merely to fill a time region.
         """
         let user = """
         Build the learning map for this \(Int(duration / 60))-minute episode.
 
-        Return 3-15 priorities in descending importance. Each priority needs a short unique id, a specific title, a concise reason it matters to understanding this episode, an exact evidence quote, and the approximate position-marker times containing that evidence. Recommend 3-12 final prompts based jointly on duration, content depth, and the number of genuinely important ideas.
+        Return 3-15 priorities in descending importance. Each priority needs a short unique id, a specific title, a concise reason it matters to understanding this episode, an exact evidence quote, and the approximate position-marker times containing that evidence. Recommend 3-12 final prompts based jointly on duration, content depth, complexity, and the number of genuinely important ideas. The recommendation should be higher for a dense episode with many distinct learning moments and lower for a light or repetitive one.
 
         COMPLETE TRANSCRIPT WITH POSITION MARKERS:
         \(transcriptWithPositions)
@@ -355,7 +364,7 @@ final class OpenRouterClient: @unchecked Sendable {
         Work evidence-first: identify the strongest claims, explanations, distinctions, mechanisms, examples, disagreements, and conclusions across the entire episode; compare them; then keep only the best learning checks. Questions must name the actual person, concept, event, example, or argument involved so they could not be reused for another podcast. Expected answers must directly answer their paired question and state only what the podcast said. Reject opinion questions, trivia, introductions, ads, housekeeping, vague summaries, and questions answerable from general knowledge.
         """
         let user = """
-        Create exactly \(count) independently useful candidate questions from the complete transcript below. Use the ranked learning map as the selection backbone: cover higher-ranked priorities first, do not create a second question for one priority until the other important priorities are covered, and never add a low-value question merely to fill the requested count.
+        Create exactly \(count) independently useful candidate questions from the complete transcript below. Use the ranked learning map as the selection backbone: cover higher-ranked priorities first, do not create a second question for one priority until the other important priorities are covered, and never add a low-value question merely to fill the requested count. Among similarly important priorities, select moments across the beginning, middle, and end so questions do not bunch together. Content importance remains primary; do not force even spacing or create filler.
 
         RANKED LEARNING MAP:
         \(learningPriorities)

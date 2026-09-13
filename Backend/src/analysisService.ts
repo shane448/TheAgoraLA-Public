@@ -11,7 +11,7 @@ export interface AnalysisJobInput {
   transcript_url?: string;
   transcript_type?: string;
   duration?: number;
-  prompt_count: number;
+  prompt_count?: number;
   model?: string;
 }
 
@@ -50,7 +50,9 @@ export async function processEpisodeAnalysis(options: {
   const analysis = await analyzeTranscript({
     transcript,
     duration,
-    desiredCount: Math.max(3, Math.min(12, options.input.prompt_count)),
+    ...(options.input.prompt_count == null
+      ? {}
+      : { desiredCount: Math.max(3, Math.min(12, options.input.prompt_count)) }),
     safetyID: createHash("sha256").update(options.userID).digest("hex"),
     openAI: options.openAI,
     config: analysisConfig,
