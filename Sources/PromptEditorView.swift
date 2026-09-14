@@ -5,7 +5,7 @@ private enum PromptEditorError: LocalizedError {
     case invalidURL
 
     var errorDescription: String? {
-        "Enter a valid HTTPS Apple Podcasts or direct audio link."
+        "Enter a valid podcast page, public RSS feed, or direct audio link."
     }
 }
 
@@ -394,7 +394,7 @@ struct PromptEditorView: View {
         .alert("Invalid URL", isPresented: $showInvalidURL) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Please enter a valid URL that starts with https://")
+            Text("Paste one complete podcast page, public RSS feed, or direct audio link.")
         }
         .alert("Podcast Analysis", isPresented: $showAnalysisError) {
             if showProviderCreditsAction {
@@ -703,10 +703,7 @@ struct PromptEditorView: View {
     }
 
     private func validatedInputURL() throws -> URL {
-        let input = normalizedSourceText(audioURLText)
-        guard let url = URL(string: input),
-              url.scheme?.lowercased() == "https",
-              url.host != nil else {
+        guard let url = PodcastSourceParser.urls(in: audioURLText).first else {
             throw PromptEditorError.invalidURL
         }
         return url
@@ -718,11 +715,8 @@ struct PromptEditorView: View {
     }
 
     private func normalizedSourceText(_ value: String) -> String {
-        if let range = value.range(of: #"https?://[^\s<>\"]+"#, options: .regularExpression) {
-            return String(value[range])
-                .trimmingCharacters(in: CharacterSet(charactersIn: ").,;]}>"))
-        }
-        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        PodcastSourceParser.urls(in: value).first?.absoluteString
+            ?? value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func operationWasCancelled(_ error: Error) -> Bool {

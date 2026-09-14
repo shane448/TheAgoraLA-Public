@@ -97,10 +97,10 @@ private final class PodcastBacklogStore: ObservableObject {
 
         var urls: [URL] = []
         for (index, entry) in filledEntries {
-            let detected = detectedHTTPSLinks(in: entry)
+            let detected = PodcastSourceParser.urls(in: entry)
             guard detected.count == 1 else {
                 notice = detected.isEmpty
-                    ? "Podcast \(index + 1) needs one complete link beginning with https://."
+                    ? "Podcast \(index + 1) needs one complete podcast or RSS link."
                     : "Podcast \(index + 1) contains multiple links. Use one link in each podcast slot."
                 return false
             }
@@ -306,26 +306,8 @@ private final class PodcastBacklogStore: ObservableObject {
         try? data.write(to: url, options: .atomic)
     }
 
-    private func detectedHTTPSLinks(in text: String) -> [URL] {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        var seen = Set<String>()
-        var urls: [URL] = []
-        detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let url = match?.url,
-                  url.scheme?.lowercased() == "https",
-                  url.host != nil else { return }
-            let key = normalizedURL(url)
-            guard seen.insert(key).inserted else { return }
-            urls.append(url)
-        }
-        return urls
-    }
-
     private func normalizedURL(_ url: URL) -> String {
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.fragment = nil
-        return (components?.url ?? url).absoluteString.lowercased()
+        PodcastSourceParser.identity(for: url)
     }
 }
 
@@ -430,7 +412,7 @@ struct PodcastBacklogView: View {
                 Text("Add Podcast Links")
                     .font(AgoraTheme.cardTitleFont)
                     .foregroundColor(AgoraTheme.ink)
-                Text("Paste one episode or show link into each podcast slot. Add up to 10 from Apple Podcasts, Spotify, or another supported service.")
+                Text("Paste one episode, show, public RSS feed, or direct audio link into each slot. Copied share messages also work.")
                     .font(AgoraTheme.tagFont)
                     .foregroundColor(AgoraTheme.inkMuted)
 

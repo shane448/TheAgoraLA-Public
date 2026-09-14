@@ -1,5 +1,67 @@
 import Foundation
 
+enum PodcastSourceParser {
+    static func urls(in text: String) -> [URL] {
+        let decoded = text.replacingOccurrences(of: "&amp;", with: "&")
+        var candidates: [String] = []
+
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            let range = NSRange(decoded.startIndex..<decoded.endIndex, in: decoded)
+            detector.enumerateMatches(in: decoded, options: [], range: range) { match, _, _ in
+                if let value = match?.url?.absoluteString {
+                    candidates.append(value)
+                }
+            }
+        }
+
+        let pattern = #"(?i)(?:(?:https?|feed|itpc|podcast)://|www\.)[^\s<>\"']+"#
+        if let expression = try? NSRegularExpression(pattern: pattern) {
+            let range = NSRange(decoded.startIndex..<decoded.endIndex, in: decoded)
+            expression.enumerateMatches(in: decoded, range: range) { match, _, _ in
+                guard let match, let swiftRange = Range(match.range, in: decoded) else { return }
+                candidates.append(String(decoded[swiftRange]))
+            }
+        }
+
+        var seen = Set<String>()
+        return candidates.compactMap(normalizedURL).filter { url in
+            seen.insert(identity(for: url)).inserted
+        }
+    }
+
+    static func identity(for url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        components.fragment = nil
+        return (components.url ?? url).absoluteString
+    }
+
+    private static func normalizedURL(from candidate: String) -> URL? {
+        let wrappers = CharacterSet(charactersIn: "[](){}<>\"'.,;:!?")
+        var value = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: wrappers)
+        if value.lowercased().hasPrefix("www.") {
+            value = "https://" + value
+        }
+
+        guard var components = URLComponents(string: value) else { return nil }
+        switch components.scheme?.lowercased() {
+        case "http", "feed", "itpc", "podcast":
+            components.scheme = "https"
+        case "https":
+            break
+        default:
+            return nil
+        }
+        components.fragment = nil
+        guard components.host != nil else { return nil }
+        return components.url
+    }
+}
+
 struct PodcastTranscriptSource {
     let url: URL
     let type: String?
@@ -370,6 +432,8 @@ struct PodcastImportService {
             "spotify.com", "pca.st", "pocketcasts.com", "overcast.fm", "castro.fm",
             "pod.link", "player.fm", "podbean.com", "iheart.com", "tunein.com",
             "music.amazon.com", "audacy.com", "youtube.com", "youtu.be", "music.youtube.com",
+            "castbox.fm", "podchaser.com", "goodpods.com", "listennotes.com",
+            "podcastaddict.com", "deezer.com",
         ].contains { host == $0 || host.hasSuffix(".\($0)") }
     }
 
