@@ -28,12 +28,12 @@ struct PlayerView: View {
                     }
 
                     VStack(spacing: 8) {
-                        Slider(
+                        PodcastProgressSlider(
                             value: Binding(
                                 get: { isScrubbing ? scrubPosition : viewModel.currentTime },
                                 set: { scrubPosition = $0 }
                             ),
-                            in: 0...max(viewModel.duration, 1),
+                            range: 0...max(viewModel.duration, 1),
                             onEditingChanged: { editing in
                                 if editing {
                                     scrubPosition = viewModel.currentTime
@@ -44,7 +44,7 @@ struct PlayerView: View {
                                 }
                             }
                         )
-                            .tint(AgoraTheme.accent)
+                            .frame(height: 32)
                             .accessibilityLabel("Episode position")
                             .accessibilityValue(formatTime(isScrubbing ? scrubPosition : viewModel.currentTime))
 
@@ -257,6 +257,76 @@ struct PlayerView: View {
     }
 
 }
+
+#if canImport(UIKit)
+private struct PodcastProgressSlider: UIViewRepresentable {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value, onEditingChanged: onEditingChanged)
+    }
+
+    func makeUIView(context: Context) -> PodcastUISlider {
+        let slider = PodcastUISlider(frame: .zero)
+        slider.isContinuous = true
+        slider.minimumTrackTintColor = UIColor(AgoraTheme.accent)
+        slider.maximumTrackTintColor = UIColor(AgoraTheme.progressTrack)
+        slider.thumbTintColor = .white
+        slider.addTarget(context.coordinator, action: #selector(Coordinator.editingBegan(_:)), for: .touchDown)
+        slider.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
+        slider.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.editingEnded(_:)),
+            for: [.touchUpInside, .touchUpOutside, .touchCancel]
+        )
+        return slider
+    }
+
+    func updateUIView(_ slider: PodcastUISlider, context: Context) {
+        context.coordinator.value = $value
+        context.coordinator.onEditingChanged = onEditingChanged
+        slider.minimumValue = Float(range.lowerBound)
+        slider.maximumValue = Float(range.upperBound)
+        slider.minimumTrackTintColor = UIColor(AgoraTheme.accent)
+        slider.maximumTrackTintColor = UIColor(AgoraTheme.progressTrack)
+        if !slider.isTracking {
+            slider.setValue(Float(min(max(value, range.lowerBound), range.upperBound)), animated: false)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var value: Binding<Double>
+        var onEditingChanged: (Bool) -> Void
+
+        init(value: Binding<Double>, onEditingChanged: @escaping (Bool) -> Void) {
+            self.value = value
+            self.onEditingChanged = onEditingChanged
+        }
+
+        @objc func editingBegan(_ slider: UISlider) {
+            onEditingChanged(true)
+        }
+
+        @objc func valueChanged(_ slider: UISlider) {
+            value.wrappedValue = Double(slider.value)
+        }
+
+        @objc func editingEnded(_ slider: UISlider) {
+            value.wrappedValue = Double(slider.value)
+            onEditingChanged(false)
+        }
+    }
+}
+
+private final class PodcastUISlider: UISlider {
+    override func trackRect(forBounds bounds: CGRect) -> CGRect {
+        let defaultRect = super.trackRect(forBounds: bounds)
+        return CGRect(x: defaultRect.minX, y: bounds.midY - 2, width: defaultRect.width, height: 4)
+    }
+}
+#endif
 
 struct PlaybackSettingsView: View {
     @ObservedObject var viewModel: PlayerViewModel

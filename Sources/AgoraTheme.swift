@@ -40,6 +40,7 @@ enum AgoraTheme {
     static let inkMuted = obsidianMuted
     static let inkOnAccent = Color.white
     static let accent = bronze
+    static let progressTrack = obsidian.opacity(0.20)
     static let shadow = Color.black.opacity(0.15)
 
     static let titleFont = Font.custom("IowanOldStyle-Bold", size: 30)
