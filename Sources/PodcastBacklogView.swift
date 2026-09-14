@@ -85,17 +85,33 @@ private final class PodcastBacklogStore: ObservableObject {
     var hasStartableItems: Bool { items.contains { $0.status == .waiting || $0.status == .failed } }
     var completedCount: Int { items.filter { $0.status == .complete }.count }
 
-    func addLinks(from text: String) {
-        let urls = detectedHTTPSLinks(in: text)
-        guard !urls.isEmpty else {
-            notice = "Paste at least one complete podcast link beginning with https://."
-            return
+    @discardableResult
+    func addLinks(from entries: [String]) -> Bool {
+        let filledEntries = entries.enumerated().filter {
+            !$0.element.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        let existing = Set(items.map { normalizedURL($0.sourceURL) })
-        let unique = urls.filter { !existing.contains(normalizedURL($0)) }
+        guard !filledEntries.isEmpty else {
+            notice = "Paste at least one complete podcast link beginning with https://."
+            return false
+        }
+
+        var urls: [URL] = []
+        for (index, entry) in filledEntries {
+            let detected = detectedHTTPSLinks(in: entry)
+            guard detected.count == 1 else {
+                notice = detected.isEmpty
+                    ? "Podcast \(index + 1) needs one complete link beginning with https://."
+                    : "Podcast \(index + 1) contains multiple links. Use one link in each podcast slot."
+                return false
+            }
+            urls.append(detected[0])
+        }
+
+        var seen = Set(items.map { normalizedURL($0.sourceURL) })
+        let unique = urls.filter { seen.insert(normalizedURL($0)).inserted }
         guard !unique.isEmpty else {
             notice = "Those podcasts are already in your backlog."
-            return
+            return false
         }
         let availableSlots = max(0, 10 - items.filter { $0.status != .complete }.count)
         let additions = unique.prefix(availableSlots).map { url in
@@ -124,6 +140,7 @@ private final class PodcastBacklogStore: ObservableObject {
         } else {
             notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s") to the backlog."
         }
+        return additions.count == unique.count
     }
 
     func startAll(episodeStore: EpisodeStore) async {
@@ -312,13 +329,19 @@ private final class PodcastBacklogStore: ObservableObject {
     }
 }
 
+private struct PodcastLinkDraft: Identifiable {
+    let id = UUID()
+    var text = ""
+}
+
 struct PodcastBacklogView: View {
     @ObservedObject var episodeStore: EpisodeStore
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var aiAccount: AIAccountStore
     @StateObject private var backlog = PodcastBacklogStore()
-    @State private var linkText = ""
+    @State private var linkDrafts = [PodcastLinkDraft()]
     @State private var showAIAccount = false
+    @FocusState private var focusedLinkID: UUID?
 
     var body: some View {
         ZStack {
@@ -407,31 +430,104 @@ struct PodcastBacklogView: View {
                 Text("Add Podcast Links")
                     .font(AgoraTheme.cardTitleFont)
                     .foregroundColor(AgoraTheme.ink)
-                Text("Paste up to 10 episode or show links from Apple Podcasts, Spotify, or another supported podcast service. Put each link on its own line.")
+                Text("Paste one episode or show link into each podcast slot. Add up to 10 from Apple Podcasts, Spotify, or another supported service.")
                     .font(AgoraTheme.tagFont)
                     .foregroundColor(AgoraTheme.inkMuted)
-                TextEditor(text: $linkText)
-                    .font(AgoraTheme.bodyFont)
-                    .foregroundColor(AgoraTheme.ink)
-                    .tint(AgoraTheme.accent)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .frame(minHeight: 110)
+
+                ForEach($linkDrafts) { $draft in
+                    let position = (linkDrafts.firstIndex { $0.id == draft.id } ?? 0) + 1
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Label("Podcast \(position)", systemImage: "waveform")
+                                .font(AgoraTheme.tagFont.weight(.semibold))
+                                .foregroundColor(AgoraTheme.inkMuted)
+                            Spacer()
+                            if linkDrafts.count > 1 {
+                                Button {
+                                    removeDraft(id: draft.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove podcast \(position)")
+                            }
+                        }
+
+                        HStack(alignment: .top, spacing: 8) {
+                            TextField("Paste podcast link", text: $draft.text, axis: .vertical)
+                                .font(AgoraTheme.bodyFont)
+                                .foregroundColor(AgoraTheme.ink)
+                                .tint(AgoraTheme.accent)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .lineLimit(2...3)
+                                .focused($focusedLinkID, equals: draft.id)
+
+                            if !draft.text.isEmpty {
+                                Button {
+                                    draft.text = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(AgoraTheme.inkMuted)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Clear podcast \(position) link")
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.white.opacity(0.88))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+                        )
+                    }
                     .padding(10)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.white.opacity(0.88))
-                    .cornerRadius(14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(AgoraTheme.cardSurface.opacity(0.58))
                     )
+                }
+
+                if linkDrafts.count < 10 {
+                    Button {
+                        addDraft()
+                    } label: {
+                        Label("Add Another Podcast", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(AgoraOutlineButtonStyle())
+                }
+
                 Button("Add to Backlog") {
-                    backlog.addLinks(from: linkText)
-                    if backlog.notice.hasPrefix("Added") { linkText = "" }
+                    if backlog.addLinks(from: linkDrafts.map(\.text)) {
+                        linkDrafts = [PodcastLinkDraft()]
+                        focusedLinkID = nil
+                    }
                 }
                 .buttonStyle(AgoraOutlineButtonStyle())
+                .disabled(linkDrafts.allSatisfy {
+                    $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                })
             }
+        }
+    }
+
+    private func addDraft() {
+        guard linkDrafts.count < 10 else { return }
+        let draft = PodcastLinkDraft()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            linkDrafts.append(draft)
+        }
+        focusedLinkID = draft.id
+    }
+
+    private func removeDraft(id: UUID) {
+        guard linkDrafts.count > 1 else { return }
+        if focusedLinkID == id { focusedLinkID = nil }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            linkDrafts.removeAll { $0.id == id }
         }
     }
 
