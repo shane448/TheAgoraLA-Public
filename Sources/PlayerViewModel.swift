@@ -352,7 +352,12 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     func presentPrompt(_ prompt: Prompt) {
         saveActiveDraft()
-        activatePrompt(prompt, beginDriving: drivingModeEnabled)
+        activatePrompt(prompt, beginDriving: false)
+        if drivingModeEnabled {
+            drivingStatusText = promptResponses[prompt.id]?.score == nil
+                ? "Tap the microphone when you're ready to hear and answer this question."
+                : "Your answer is saved. Tap the microphone only if you want to answer again."
+        }
     }
 
     var queuedPrompts: [Prompt] {
@@ -470,9 +475,15 @@ final class PlayerViewModel: NSObject, ObservableObject {
     func drivingMicTapped() {
         if drivingPromptState == .listening || speechManager.isRecording {
             Task { await stopListeningAndSubmitIfPossible() }
-        } else {
-            Task { await startListening() }
+        } else if drivingPromptState == .idle,
+                  showPrompt,
+                  let activePrompt {
+            beginDrivingFlow(for: activePrompt)
         }
+    }
+
+    var canUseDrivingMicrophone: Bool {
+        drivingPromptState == .idle || drivingPromptState == .listening
     }
 
     func stopFeedbackNarration() {

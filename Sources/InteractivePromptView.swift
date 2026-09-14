@@ -114,14 +114,19 @@ struct InteractivePromptView: View {
                             Button {
                                 viewModel.drivingMicTapped()
                             } label: {
-                                Image(systemName: viewModel.speechManager.isRecording ? "stop.fill" : "mic.fill")
+                                Image(systemName: isHandsFreeListening ? "stop.fill" : "mic.fill")
                                     .font(.system(size: 34, weight: .bold))
                                     .foregroundColor(AgoraTheme.inkOnAccent)
                                     .frame(width: 110, height: 110)
                                     .background(Circle().fill(AgoraTheme.accentGradient))
                                     .shadow(color: AgoraTheme.shadow, radius: 10, x: 0, y: 6)
                             }
-                            .accessibilityLabel(viewModel.speechManager.isRecording ? "Stop recording" : "Start recording")
+                            .disabled(!viewModel.canUseDrivingMicrophone)
+                            .accessibilityLabel(
+                                isHandsFreeListening
+                                    ? "Stop recording"
+                                    : "Read the question and start answering"
+                            )
                         }
                     }
                 } else {
@@ -229,5 +234,9 @@ struct InteractivePromptView: View {
         case .idle:
             return "waveform.and.mic"
         }
+    }
+
+    private var isHandsFreeListening: Bool {
+        viewModel.drivingPromptState == .listening
     }
 }
