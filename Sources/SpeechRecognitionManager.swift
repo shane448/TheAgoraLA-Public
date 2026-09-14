@@ -69,7 +69,7 @@ final class SpeechRecognitionManager: ObservableObject {
         recordingStartID = startID
         guard await requestAuthorization() else { return false }
         guard !Task.isCancelled, recordingStartID == startID else { return false }
-        stopRecording()
+        stopRecording(restorePlaybackSession: false)
         transcript = ""
         lastErrorMessage = nil
         inputLevel = 0
@@ -81,7 +81,7 @@ final class SpeechRecognitionManager: ObservableObject {
             try session.setCategory(
                 .playAndRecord,
                 mode: .measurement,
-                options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP]
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
             try session.setActive(true, options: [])
             // Let the system honor the listener's headset or selected microphone.
@@ -168,14 +168,14 @@ final class SpeechRecognitionManager: ObservableObject {
         }
     }
 
-    func stopRecording() {
+    func stopRecording(restorePlaybackSession: Bool = true) {
         recordingStartID = UUID()
         stopAudioCapture()
         recognitionSessionID = UUID()
         request?.endAudio()
         recognitionTask?.cancel()
-        completeFinalization()
-        clearRecognitionResources()
+        completeFinalization(restorePlaybackSession: restorePlaybackSession)
+        clearRecognitionResources(restorePlaybackSession: restorePlaybackSession)
     }
 
     private func stopAudioCapture() {
@@ -196,22 +196,31 @@ final class SpeechRecognitionManager: ObservableObject {
         clearRecognitionResources()
     }
 
-    private func completeFinalization() {
+    private func completeFinalization(restorePlaybackSession: Bool = true) {
         finalizationTimeoutTask?.cancel()
         finalizationTimeoutTask = nil
         guard let continuation = finalizationContinuation else { return }
         finalizationContinuation = nil
         let finalTranscript = transcript
-        clearRecognitionResources()
+        clearRecognitionResources(restorePlaybackSession: restorePlaybackSession)
         continuation.resume(returning: finalTranscript)
     }
 
-    private func clearRecognitionResources() {
+    private func clearRecognitionResources(restorePlaybackSession: Bool = true) {
         recognitionTask?.cancel()
         recognitionTask = nil
         request = nil
+        if restorePlaybackSession {
+            restorePlaybackAudioSession()
+        }
+    }
+
+    private func restorePlaybackAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            let session = AVAudioSession.sharedInstance()
+            // Keep Agora as the active media owner so a paused car app is not invited to resume.
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true, options: [])
         } catch {}
     }
 

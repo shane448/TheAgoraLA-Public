@@ -109,9 +109,6 @@ final class AudioPlayerManager: ObservableObject {
         newPlayer.seek(to: .zero)
         player = newPlayer
 
-        // Configure audio session so playback works even with the silent switch
-        configureAudioSession()
-
         #if os(iOS)
         interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let self else { return }

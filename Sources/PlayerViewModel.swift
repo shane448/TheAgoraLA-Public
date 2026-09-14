@@ -890,7 +890,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         }
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setCategory(.playback, mode: .spokenAudio, options: [])
             try session.setActive(true, options: [])
         } catch {}
         let utterance = AVSpeechUtterance(string: text)

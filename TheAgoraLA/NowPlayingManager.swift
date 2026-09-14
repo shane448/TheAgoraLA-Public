@@ -22,6 +22,7 @@ final class NowPlayingManager {
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = 0.0
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
         infoCenter.nowPlayingInfo = nowPlayingInfo
+        infoCenter.playbackState = .paused
     }
 
     func update(elapsed: Double, isPlaying: Bool, duration: Double?) {
@@ -31,6 +32,7 @@ final class NowPlayingManager {
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         infoCenter.nowPlayingInfo = nowPlayingInfo
+        infoCenter.playbackState = isPlaying ? .playing : .paused
     }
 
     private func configureRemoteCommands() {
