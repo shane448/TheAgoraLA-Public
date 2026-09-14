@@ -416,8 +416,8 @@ struct PodcastBacklogView: View {
                     .font(AgoraTheme.tagFont)
                     .foregroundColor(AgoraTheme.inkMuted)
 
-                ForEach($linkDrafts) { $draft in
-                    let position = (linkDrafts.firstIndex { $0.id == draft.id } ?? 0) + 1
+                ForEach(Array(linkDrafts.enumerated()), id: \.element.id) { index, draft in
+                    let position = index + 1
                     VStack(alignment: .leading, spacing: 7) {
                         HStack {
                             Label("Podcast \(position)", systemImage: "waveform")
@@ -437,7 +437,7 @@ struct PodcastBacklogView: View {
                         }
 
                         HStack(alignment: .top, spacing: 8) {
-                            TextField("Paste podcast link", text: $draft.text, axis: .vertical)
+                            TextField("Paste podcast link", text: draftTextBinding(for: draft.id), axis: .vertical)
                                 .font(AgoraTheme.bodyFont)
                                 .foregroundColor(AgoraTheme.ink)
                                 .tint(AgoraTheme.accent)
@@ -449,7 +449,7 @@ struct PodcastBacklogView: View {
 
                             if !draft.text.isEmpty {
                                 Button {
-                                    draft.text = ""
+                                    clearDraft(id: draft.id)
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(AgoraTheme.inkMuted)
@@ -483,10 +483,7 @@ struct PodcastBacklogView: View {
                 }
 
                 Button("Add to Backlog") {
-                    if backlog.addLinks(from: linkDrafts.map(\.text)) {
-                        linkDrafts = [PodcastLinkDraft()]
-                        focusedLinkID = nil
-                    }
+                    submitDrafts()
                 }
                 .buttonStyle(AgoraOutlineButtonStyle())
                 .disabled(linkDrafts.allSatisfy {
@@ -503,6 +500,33 @@ struct PodcastBacklogView: View {
             linkDrafts.append(draft)
         }
         focusedLinkID = draft.id
+    }
+
+    private func draftTextBinding(for id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                linkDrafts.first(where: { $0.id == id })?.text ?? ""
+            },
+            set: { newValue in
+                guard let index = linkDrafts.firstIndex(where: { $0.id == id }) else { return }
+                linkDrafts[index].text = newValue
+            }
+        )
+    }
+
+    private func clearDraft(id: UUID) {
+        guard let index = linkDrafts.firstIndex(where: { $0.id == id }) else { return }
+        linkDrafts[index].text = ""
+    }
+
+    private func submitDrafts() {
+        let entries = linkDrafts.map(\.text)
+        focusedLinkID = nil
+        guard backlog.addLinks(from: entries) else { return }
+
+        DispatchQueue.main.async {
+            linkDrafts = [PodcastLinkDraft()]
+        }
     }
 
     private func removeDraft(id: UUID) {
