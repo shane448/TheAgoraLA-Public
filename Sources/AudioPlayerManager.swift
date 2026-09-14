@@ -11,6 +11,7 @@ final class AudioPlayerManager: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var isBuffering: Bool = false
     @Published private(set) var playbackError: String?
+    @Published private(set) var loadedURL: URL?
 
     private var itemFailureObserver: NSObjectProtocol?
     private var playbackEndedObserver: NSObjectProtocol?
@@ -21,6 +22,7 @@ final class AudioPlayerManager: ObservableObject {
     private var statusObserver: NSKeyValueObservation?
     private var interruptionObserver: NSObjectProtocol?
     private var wasPlayingBeforeInterruption = false
+    private var loadGeneration = 0
 
     private func configureAudioSession() {
         #if os(iOS)
@@ -42,6 +44,9 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     func load(url: URL) {
+        loadGeneration += 1
+        let generation = loadGeneration
+
         // Reset any existing state
         pause()
         removeTimeObserver()
@@ -74,6 +79,7 @@ final class AudioPlayerManager: ObservableObject {
         duration = 0
         isBuffering = false
         playbackError = nil
+        loadedURL = nil
 
         // Create and assign a new player for the provided URL (simple, stable path)
         let item = AVPlayerItem(url: url)
@@ -84,15 +90,22 @@ final class AudioPlayerManager: ObservableObject {
             guard let self else { return }
             let bufferEmpty = change.newValue ?? false
             guard bufferEmpty else { return }
-            DispatchQueue.main.async { self.isBuffering = true }
+            DispatchQueue.main.async {
+                guard self.loadGeneration == generation else { return }
+                self.isBuffering = true
+            }
         }
         likelyToKeepUpObserver = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] _, change in
             guard let self else { return }
-            DispatchQueue.main.async { self.isBuffering = true != (change.newValue ?? false) }
+            DispatchQueue.main.async {
+                guard self.loadGeneration == generation else { return }
+                self.isBuffering = true != (change.newValue ?? false)
+            }
         }
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
             DispatchQueue.main.async {
+                guard self.loadGeneration == generation else { return }
                 if item.status == .readyToPlay {
                     self.isBuffering = false
                     self.playbackError = nil
@@ -108,6 +121,7 @@ final class AudioPlayerManager: ObservableObject {
         newPlayer.automaticallyWaitsToMinimizeStalling = true
         newPlayer.seek(to: .zero)
         player = newPlayer
+        loadedURL = url
 
         #if os(iOS)
         interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in

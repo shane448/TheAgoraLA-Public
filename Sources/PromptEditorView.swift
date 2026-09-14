@@ -129,6 +129,7 @@ struct PromptEditorView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .disabled(isResolving || isPreparingTranscript)
                         .agoraFieldStyle()
                         .overlay(alignment: .trailing) {
                             if !audioURLText.isEmpty {
@@ -140,6 +141,7 @@ struct PromptEditorView: View {
                                         .padding(.trailing, 10)
                                 }
                                 .accessibilityLabel("Clear URL")
+                                .disabled(isResolving || isPreparingTranscript)
                             }
                         }
 
@@ -455,15 +457,21 @@ struct PromptEditorView: View {
 
         do {
             let inputURL = try validatedInputURL()
+            let requestedSourceText = normalizedSourceText(inputURL.absoluteString)
             let imported = try await PodcastImportService().importMetadata(from: inputURL)
+            try Task.checkCancellation()
+            guard normalizedSourceText(audioURLText) == requestedSourceText else {
+                importStatusText = "The podcast link changed before import finished. Tap Import, Analyze & Save again to use the new link."
+                return
+            }
             let oldTranscript = (episodeStore.episode.transcript ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let editedTranscript = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let sourceChanged = episodeStore.episode.sourceURL != inputURL
-                || (episodeStore.episode.sourceURL == nil && (
-                    imported.audioURL != episodeStore.episode.audioURL
-                    || imported.episodeGUID != episodeStore.episode.episodeGUID
-                ))
+            let sourceChanged = !episodeStore.matchesResolvedEpisode(
+                audioURL: imported.audioURL,
+                feedURL: imported.feedURL,
+                episodeGUID: imported.episodeGUID
+            )
             let preferredTranscript = sourceChanged && editedTranscript == oldTranscript
                 ? nil
                 : (editedTranscript.isEmpty ? nil : editedTranscript)

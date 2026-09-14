@@ -192,8 +192,11 @@ final class EpisodeStore: ObservableObject {
         transcript: String?,
         summary: String?
     ) {
-        let sourceChanged = episode.sourceURL != sourceURL
-            || (episode.sourceURL == nil && episode.audioURL != audioURL)
+        let sourceChanged = !matchesResolvedEpisode(
+            audioURL: audioURL,
+            feedURL: feedURL,
+            episodeGUID: episodeGUID
+        )
         episode = Episode(
             id: sourceChanged ? UUID() : episode.id,
             title: title,
@@ -206,6 +209,21 @@ final class EpisodeStore: ObservableObject {
             summary: summary
         )
         persist()
+    }
+
+    func matchesResolvedEpisode(audioURL: URL, feedURL: URL?, episodeGUID: String?) -> Bool {
+        let currentGUID = normalizedIdentifier(episode.episodeGUID)
+        let importedGUID = normalizedIdentifier(episodeGUID)
+
+        if let currentGUID, let importedGUID {
+            guard currentGUID == importedGUID else { return false }
+            if let currentFeed = episode.feedURL, let feedURL {
+                return normalizedFeedURL(currentFeed) == normalizedFeedURL(feedURL)
+            }
+            return true
+        }
+
+        return episode.audioURL == audioURL
     }
 
     func updateSummary(_ summary: String?) {
@@ -294,5 +312,18 @@ final class EpisodeStore: ObservableObject {
         guard let url = Self.libraryStorageURL,
               let data = try? JSONEncoder().encode(savedEpisodes) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    private func normalizedIdentifier(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func normalizedFeedURL(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.fragment = nil
+        components.query = nil
+        return components.url ?? url
     }
 }

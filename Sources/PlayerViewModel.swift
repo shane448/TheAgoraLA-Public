@@ -196,6 +196,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     func updateEpisode(_ updated: Episode) {
         let sourceChanged = episode.id != updated.id || episode.audioURL != updated.audioURL
+        let playerNeedsReload = !updated.audioURL.isFileURL && audioManager.loadedURL != updated.audioURL
         if sourceChanged { saveActiveDraft() }
         episode = updated
         promptTriggerTimes.removeAll()
@@ -213,6 +214,10 @@ final class PlayerViewModel: NSObject, ObservableObject {
             activePrompt = nil
             hasScoredActivePrompt = false
         } else {
+            if playerNeedsReload {
+                audioManager.load(url: updated.audioURL)
+                PlayerDurationCache.shared.duration = 0
+            }
             let validPromptIDs = Set(updated.prompts.map(\.id))
             encounteredPromptIDs.removeAll { !validPromptIDs.contains($0) }
             promptedIDs.formIntersection(validPromptIDs)

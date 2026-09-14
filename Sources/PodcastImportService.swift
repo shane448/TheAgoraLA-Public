@@ -429,8 +429,10 @@ struct PodcastImportService {
         acceptedTypes: [String]
     ) async throws -> (data: Data, finalURL: URL) {
         var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 30
         request.setValue(acceptedTypes.joined(separator: ", "), forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
