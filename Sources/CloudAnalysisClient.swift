@@ -15,6 +15,8 @@ enum CloudAnalysisError: LocalizedError {
             return message
         }
     }
+
+    static let backgroundServiceUnavailable = "Agora's background analysis service is temporarily offline. Your podcasts are still saved in the backlog; try Analyze Backlog again when the service is restored."
 }
 
 struct PendingCloudAnalysis: Codable {
@@ -53,6 +55,21 @@ struct CloudAnalysisClient {
     static var pendingAnalysis: PendingCloudAnalysis? {
         guard let data = UserDefaults.standard.data(forKey: pendingKey) else { return nil }
         return try? JSONDecoder().decode(PendingCloudAnalysis.self, from: data)
+    }
+
+    func verifyAvailability() async throws {
+        var request = try makeRequest(path: "health", method: "GET")
+        request.timeoutInterval = 12
+        let (data, response) = try await send(request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudAnalysisError.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw CloudAnalysisError.service(
+                serviceMessage(from: data, response: http)
+                    ?? CloudAnalysisError.backgroundServiceUnavailable
+            )
+        }
     }
 
     func submitAndWait(
@@ -176,7 +193,10 @@ struct CloudAnalysisClient {
                 continue
             }
             guard (200...299).contains(http.statusCode) else {
-                throw CloudAnalysisError.service(serviceMessage(from: data) ?? "Cloud analysis is temporarily unavailable.")
+                throw CloudAnalysisError.service(
+                    serviceMessage(from: data, response: http)
+                        ?? "Cloud analysis is temporarily unavailable."
+                )
             }
             return data
         }
@@ -198,9 +218,15 @@ struct CloudAnalysisClient {
             body: ["installation_id": installationID]
         )
         let (data, response) = try await send(request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudAnalysisError.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode),
               let token = (try? JSONDecoder().decode(SessionEnvelope.self, from: data))?.token else {
-            throw CloudAnalysisError.service(serviceMessage(from: data) ?? "The cloud session could not be started.")
+            throw CloudAnalysisError.service(
+                serviceMessage(from: data, response: http)
+                    ?? "The cloud session could not be started."
+            )
         }
         UserDefaults.standard.set(token, forKey: Self.sessionKey)
         return token
@@ -269,8 +295,14 @@ struct CloudAnalysisClient {
         clearPending()
     }
 
-    private func serviceMessage(from data: Data) -> String? {
-        (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.displayMessage
+    private func serviceMessage(from data: Data, response: HTTPURLResponse? = nil) -> String? {
+        let decoded = (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.displayMessage
+        let railwayFallback = response?.value(forHTTPHeaderField: "x-railway-fallback")?.lowercased() == "true"
+        let missingApplication = decoded?.localizedCaseInsensitiveContains("application not found") == true
+        if railwayFallback || missingApplication {
+            return CloudAnalysisError.backgroundServiceUnavailable
+        }
+        return decoded
     }
 }
 

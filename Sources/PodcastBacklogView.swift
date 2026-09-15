@@ -75,7 +75,13 @@ private final class PodcastBacklogStore: ObservableObject {
         if let url = Self.storageURL,
            let data = try? Data(contentsOf: url),
            let saved = try? JSONDecoder().decode([PodcastBacklogItem].self, from: data) {
-            items = saved
+            items = saved.map { storedItem in
+                var item = storedItem
+                if item.errorMessage?.localizedCaseInsensitiveContains("application not found") == true {
+                    item.errorMessage = CloudAnalysisError.backgroundServiceUnavailable
+                }
+                return item
+            }
         } else {
             items = []
         }
@@ -107,14 +113,38 @@ private final class PodcastBacklogStore: ObservableObject {
             urls.append(detected[0])
         }
 
-        var seen = Set(items.map { normalizedURL($0.sourceURL) })
-        let unique = urls.filter { seen.insert(normalizedURL($0)).inserted }
-        guard !unique.isEmpty else {
-            notice = "Those podcasts are already in your backlog."
-            return false
+        var requested = Set<String>()
+        let unique = urls.filter { requested.insert(normalizedURL($0)).inserted }
+        var newURLs: [URL] = []
+        var restoredCount = 0
+        var waitingCount = 0
+        var runningCount = 0
+        var completeCount = 0
+
+        for url in unique {
+            let identity = normalizedURL(url)
+            guard let index = items.firstIndex(where: { normalizedURL($0.sourceURL) == identity }) else {
+                newURLs.append(url)
+                continue
+            }
+
+            switch items[index].status {
+            case .failed:
+                items[index].status = .waiting
+                items[index].jobID = nil
+                items[index].errorMessage = nil
+                restoredCount += 1
+            case .waiting:
+                waitingCount += 1
+            case .resolving, .submitting, .queued, .processing:
+                runningCount += 1
+            case .complete:
+                completeCount += 1
+            }
         }
+
         let availableSlots = max(0, 10 - items.filter { $0.status != .complete }.count)
-        let additions = unique.prefix(availableSlots).map { url in
+        let additions = newURLs.prefix(availableSlots).map { url in
             PodcastBacklogItem(
                 id: UUID(),
                 episodeID: UUID(),
@@ -135,12 +165,26 @@ private final class PodcastBacklogStore: ObservableObject {
         }
         items.append(contentsOf: additions)
         persist()
-        if additions.count < unique.count {
+        if additions.count < newURLs.count {
             notice = "Added \(additions.count). Finish or remove queued items before adding more than 10 active episodes."
-        } else {
+            return false
+        } else if restoredCount > 0 {
+            let addedText = additions.isEmpty
+                ? ""
+                : " and added \(additions.count) new podcast\(additions.count == 1 ? "" : "s")"
+            notice = "Restored \(restoredCount) failed podcast\(restoredCount == 1 ? "" : "s")\(addedText). Tap Analyze Backlog to try again."
+        } else if !additions.isEmpty {
             notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s") to the backlog."
+        } else if runningCount > 0 {
+            notice = "That podcast is already being analyzed in your backlog."
+        } else if waitingCount > 0 {
+            notice = "That podcast is already ready. Tap Analyze Backlog to begin."
+        } else if completeCount > 0 {
+            notice = "That podcast is already prepared and ready to listen to below."
+        } else {
+            notice = "Those podcasts are already in your backlog."
         }
-        return additions.count == unique.count
+        return true
     }
 
     func startAll(episodeStore: EpisodeStore) async {
@@ -160,8 +204,17 @@ private final class PodcastBacklogStore: ObservableObject {
         }
 
         isSubmitting = true
-        notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
         defer { isSubmitting = false }
+
+        notice = "Checking the background analysis service..."
+        do {
+            try await CloudAnalysisClient().verifyAvailability()
+        } catch {
+            notice = error.localizedDescription
+            return
+        }
+
+        notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
 
         for start in stride(from: 0, to: ids.count, by: 3) {
             let end = min(start + 3, ids.count)
@@ -226,8 +279,18 @@ private final class PodcastBacklogStore: ObservableObject {
                    [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains(urlError.code) {
                     continue
                 }
+                let message = error.localizedDescription
+                if message == CloudAnalysisError.backgroundServiceUnavailable {
+                    update(id) {
+                        $0.status = .failed
+                        $0.jobID = nil
+                        $0.errorMessage = message
+                    }
+                    notice = message
+                    continue
+                }
                 update(id) {
-                    $0.errorMessage = "Status will refresh when the cloud is reachable. \(error.localizedDescription)"
+                    $0.errorMessage = "Status will refresh when the cloud is reachable. \(message)"
                 }
             }
         }
@@ -284,7 +347,10 @@ private final class PodcastBacklogStore: ObservableObject {
         } catch {
             update(id) {
                 $0.status = .failed
-                $0.errorMessage = error.localizedDescription
+                let message = error.localizedDescription
+                $0.errorMessage = message.localizedCaseInsensitiveContains("application not found")
+                    ? CloudAnalysisError.backgroundServiceUnavailable
+                    : message
             }
         }
     }
