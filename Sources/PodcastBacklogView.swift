@@ -343,14 +343,20 @@ struct PodcastBacklogView: View {
                                 item: item,
                                 isSelected: episodeStore.episode.id == item.episodeID,
                                 onUse: {
-                                    if episodeStore.selectEpisode(id: item.episodeID) { dismiss() }
+                                    Task {
+                                        await episodeStore.loadLibraryIfNeeded()
+                                        if episodeStore.selectEpisode(id: item.episodeID) { dismiss() }
+                                    }
                                 },
                                 onRetry: { backlog.retry(item.id) },
                                 onRemove: {
-                                    if item.status == .complete {
-                                        episodeStore.deleteSavedEpisode(id: item.episodeID)
+                                    Task {
+                                        if item.status == .complete {
+                                            await episodeStore.loadLibraryIfNeeded()
+                                            episodeStore.deleteSavedEpisode(id: item.episodeID)
+                                        }
+                                        backlog.remove(item.id)
                                     }
-                                    backlog.remove(item.id)
                                 }
                             )
                         }
@@ -361,6 +367,7 @@ struct PodcastBacklogView: View {
             }
         }
         .task {
+            await episodeStore.loadLibraryIfNeeded()
             while !Task.isCancelled {
                 await backlog.refreshAll(episodeStore: episodeStore)
                 try? await Task.sleep(nanoseconds: backlog.hasActiveJobs ? 8_000_000_000 : 15_000_000_000)

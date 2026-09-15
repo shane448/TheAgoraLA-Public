@@ -4,9 +4,11 @@ import Foundation
 final class EpisodeStore: ObservableObject {
     @Published var episode: Episode
     @Published private(set) var savedEpisodes: [Episode]
+    @Published private(set) var isLibraryLoaded = false
 
     private let storageKey = "TheAgoraLA.Episode.Data"
     private static let retiredDemoID = UUID(uuidString: "A60DD4CF-8B21-4A03-9D36-E43EC6C351AE")!
+    private var libraryLoadTask: Task<[Episode], Never>?
 
     private static var storageURL: URL? {
         guard let applicationSupport = FileManager.default.urls(
@@ -39,18 +41,38 @@ final class EpisodeStore: ObservableObject {
         }
 
         episode = loadedEpisode
-        if let url = Self.libraryStorageURL,
-           let data = try? Data(contentsOf: url),
-           let saved = try? JSONDecoder().decode([Episode].self, from: data) {
-            savedEpisodes = saved
-        } else {
-            savedEpisodes = []
-        }
+        savedEpisodes = []
 
         if episode.id == Self.retiredDemoID {
             episode = MockEpisodeProvider.sample
         }
-        persist()
+    }
+
+    func loadLibraryIfNeeded() async {
+        guard !isLibraryLoaded else { return }
+
+        let task: Task<[Episode], Never>
+        if let libraryLoadTask {
+            task = libraryLoadTask
+        } else {
+            let url = Self.libraryStorageURL
+            task = Task.detached(priority: .userInitiated) {
+                guard let url,
+                      let data = try? Data(contentsOf: url),
+                      let episodes = try? JSONDecoder().decode([Episode].self, from: data) else {
+                    return []
+                }
+                return episodes
+            }
+            libraryLoadTask = task
+        }
+
+        let loadedEpisodes = await task.value
+        guard !isLibraryLoaded else { return }
+        savedEpisodes = loadedEpisodes
+        isLibraryLoaded = true
+        libraryLoadTask = nil
+        syncActiveEpisodeIntoLibrary()
     }
 
     func updateEpisode(_ updated: Episode) {
@@ -296,7 +318,7 @@ final class EpisodeStore: ObservableObject {
     }
 
     private func syncActiveEpisodeIntoLibrary() {
-        guard !episode.audioURL.isFileURL else { return }
+        guard isLibraryLoaded, !episode.audioURL.isFileURL else { return }
         upsertSavedEpisode(episode)
     }
 
@@ -309,7 +331,8 @@ final class EpisodeStore: ObservableObject {
     }
 
     private func persistLibrary() {
-        guard let url = Self.libraryStorageURL,
+        guard isLibraryLoaded,
+              let url = Self.libraryStorageURL,
               let data = try? JSONEncoder().encode(savedEpisodes) else { return }
         try? data.write(to: url, options: .atomic)
     }
