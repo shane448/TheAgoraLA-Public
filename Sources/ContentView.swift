@@ -65,6 +65,7 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .audioDurationUpdated)) { notification in
                 if let duration = notification.userInfo?["duration"] as? Double {
                     PlayerDurationCache.shared.duration = duration
+                    episodeStore.updateDuration(duration)
                 }
             }
             .onReceive(episodeStore.$episode) { updated in

@@ -271,7 +271,7 @@ export function selectDistributedPrompts(
   const coverageCandidates = duration >= 1_800
     ? remaining
     : remaining.filter((prompt) => weightedScore(prompt) >= highestQuality - 0.12);
-  const regionCount = Math.min(4, count);
+  const regionCount = timelineRegionCount(count, duration);
   for (let region = 0; region < regionCount; region += 1) {
     const lowerBound = duration * region / regionCount;
     const upperBound = duration * (region + 1) / regionCount;
@@ -288,7 +288,8 @@ export function selectDistributedPrompts(
   }
 
   while (selected.length < count && remaining.length > 0) {
-    const distinct = remaining.filter((prompt) => selected.every((existing) => distinctPrompts(existing, prompt)));
+    const distinct = remaining.filter((prompt) => selected.every((existing) => distinctPrompts(existing, prompt))
+      && canAddToTimeline(prompt, selected, count, duration));
     if (distinct.length === 0) break;
 
     const highestQuality = Math.max(...distinct.map(weightedScore));
@@ -311,9 +312,41 @@ function distinctPrompts(left: EpisodePrompt, right: EpisodePrompt): boolean {
 
 function hasRequiredTimelineCoverage(prompts: EpisodePrompt[], duration: number): boolean {
   if (duration < 1_800 || prompts.length < 6) return true;
-  const regions = new Set(prompts.map((prompt) => Math.min(3, Math.floor(prompt.time / Math.max(duration, 1) * 4))));
+  const regionCount = timelineRegionCount(prompts.length, duration);
+  const regions = new Set(prompts.map((prompt) => Math.min(
+    regionCount - 1,
+    Math.floor(prompt.time / Math.max(duration, 1) * regionCount),
+  )));
+  const quarterCounts = [0, 0, 0, 0];
+  for (const prompt of prompts) {
+    const quarter = Math.min(3, Math.floor(prompt.time / Math.max(duration, 1) * 4));
+    quarterCounts[quarter] = (quarterCounts[quarter] ?? 0) + 1;
+  }
+  const maximumPerQuarter = Math.ceil(prompts.length / 4);
   const latestPrompt = Math.max(0, ...prompts.map((prompt) => prompt.time));
-  return regions.size === 4 && latestPrompt >= duration * 0.80;
+  return regions.size === regionCount
+    && quarterCounts.every((value) => value <= maximumPerQuarter)
+    && latestPrompt >= duration * 0.80;
+}
+
+function timelineRegionCount(promptCount: number, duration: number): number {
+  if (duration < 1_800) return Math.min(4, Math.max(promptCount, 1));
+  const tenMinuteRegions = Math.ceil(duration / 600);
+  return Math.min(Math.max(promptCount, 1), Math.max(4, Math.min(8, tenMinuteRegions)));
+}
+
+function canAddToTimeline(
+  prompt: EpisodePrompt,
+  selected: EpisodePrompt[],
+  desiredCount: number,
+  duration: number,
+): boolean {
+  if (duration < 1_800) return true;
+  const quarter = Math.min(3, Math.floor(prompt.time / Math.max(duration, 1) * 4));
+  const quarterCount = selected.filter((item) => (
+    Math.min(3, Math.floor(item.time / Math.max(duration, 1) * 4)) === quarter
+  )).length;
+  return quarterCount < Math.ceil(desiredCount / 4);
 }
 
 function distributedScore(prompt: EpisodePrompt, selected: EpisodePrompt[], idealSpacing: number): number {
@@ -328,8 +361,11 @@ function minimumTimeDistance(prompt: EpisodePrompt, selected: EpisodePrompt[]): 
 
 function transcriptChunks(transcript: string, duration: number): string[] {
   const words = transcript.split(/\s+/).filter(Boolean);
-  const chunkSize = 3_200;
   const overlap = 180;
+  const targetSections = duration >= 1_800
+    ? minimumPromptCountForDuration(duration)
+    : Math.max(2, Math.min(4, minimumPromptCountForDuration(duration)));
+  const chunkSize = Math.max(700, Math.min(3_200, Math.ceil(words.length / targetSections) + overlap));
   const chunks: string[] = [];
   for (let start = 0; start < words.length; start += chunkSize - overlap) {
     const end = Math.min(words.length, start + chunkSize);

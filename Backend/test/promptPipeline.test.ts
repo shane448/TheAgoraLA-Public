@@ -131,6 +131,22 @@ describe("prompt distribution", () => {
     expect(selected).toHaveLength(8);
     expect(selected[0]!.time).toBeGreaterThan(34);
     expect(selected.at(-1)!.time).toBeGreaterThanOrEqual(2_480);
-    expect(new Set(selected.map((item) => Math.min(3, Math.floor(item.time / 3_246 * 4)))).size).toBe(4);
+    expect(new Set(selected.map((item) => Math.min(5, Math.floor(item.time / 3_246 * 6)))).size).toBe(6);
+    const quarterCounts = [0, 0, 0, 0];
+    for (const item of selected) {
+      const quarter = Math.min(3, Math.floor(item.time / 3_246 * 4));
+      quarterCounts[quarter] = (quarterCounts[quarter] ?? 0) + 1;
+    }
+    expect(Math.max(...quarterCounts)).toBeLessThanOrEqual(2);
+  });
+
+  it("refuses an opening-only candidate set for a long episode", () => {
+    const candidates = Array.from({ length: 10 }, (_, index) => prompt({
+      time: 180 + index * 45,
+      question: `What distinct opening claim number ${index + 1} does the guest develop in this discussion?`,
+      expected_answer: `Opening claim number ${index + 1} develops a specific argument supported by the episode's introductory evidence.`,
+    }));
+    const selected = selectDistributedPrompts(candidates, 8, 3_246);
+    expect(selected.length).toBeLessThan(8);
   });
 });

@@ -36,6 +36,7 @@ struct Episode: Identifiable, Codable {
     let episodeGUID: String?
     let transcript: String?
     let summary: String?
+    let durationSeconds: Double?
 
     init(
         id: UUID,
@@ -46,7 +47,8 @@ struct Episode: Identifiable, Codable {
         feedURL: URL? = nil,
         episodeGUID: String? = nil,
         transcript: String? = nil,
-        summary: String? = nil
+        summary: String? = nil,
+        durationSeconds: Double? = nil
     ) {
         self.id = id
         self.title = title
@@ -57,10 +59,11 @@ struct Episode: Identifiable, Codable {
         self.episodeGUID = episodeGUID
         self.transcript = transcript
         self.summary = summary
+        self.durationSeconds = durationSeconds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, audioURL, sourceURL, prompts, feedURL, episodeGUID, transcript, summary
+        case id, title, audioURL, sourceURL, prompts, feedURL, episodeGUID, transcript, summary, durationSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -74,6 +77,7 @@ struct Episode: Identifiable, Codable {
         episodeGUID = try container.decodeIfPresent(String.self, forKey: .episodeGUID)
         transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -87,6 +91,7 @@ struct Episode: Identifiable, Codable {
         try container.encodeIfPresent(episodeGUID, forKey: .episodeGUID)
         try container.encodeIfPresent(transcript, forKey: .transcript)
         try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
     }
 }
 

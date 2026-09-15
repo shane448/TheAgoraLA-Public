@@ -62,7 +62,7 @@ struct PromptEditorView: View {
                         .foregroundColor(AgoraTheme.inkMuted)
                 }
                 Spacer()
-                AgoraTag(text: "Editor")
+                AgoraTag(text: appVersionLabel)
                 Button("Done") {
                     dismiss()
                 }
@@ -296,6 +296,26 @@ struct PromptEditorView: View {
                 .font(AgoraTheme.cardTitleFont)
                 .foregroundColor(AgoraTheme.ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !episodeStore.episode.prompts.isEmpty {
+                AgoraCard {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("Complete prompt timeline")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(episodeStore.episode.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds }) { prompt in
+                                    AgoraTag(text: formatEpisodeTime(prompt.timestampSeconds))
+                                }
+                            }
+                        }
+                        Text("\(episodeStore.episode.prompts.count) questions across \(formatEpisodeTime(promptEditorDurationSeconds)). Later prompts remain visible here even when their editor cards are collapsed below.")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                    }
+                }
+            }
 
             ForEach(Array(visiblePrompts.enumerated()), id: \.element.id) { index, prompt in
                 PromptRow(index: index, prompt: prompt, episodeDuration: promptEditorDurationSeconds) {
@@ -614,7 +634,8 @@ struct PromptEditorView: View {
             feedURL: imported.feedURL,
             episodeGUID: imported.episodeGUID,
             transcript: preferredTranscript,
-            summary: initialSummary
+            summary: initialSummary,
+            durationSeconds: imported.durationSeconds
         )
     }
 
@@ -800,7 +821,19 @@ struct PromptEditorView: View {
 
     private var promptEditorDurationSeconds: Double {
         let maxPrompt = episodeStore.episode.prompts.map(\.timestampSeconds).max() ?? 0
-        return max(PlayerDurationCache.shared.duration, maxPrompt + 60, 600)
+        return max(episodeStore.episode.durationSeconds ?? 0, PlayerDurationCache.shared.duration, maxPrompt + 60, 600)
+    }
+
+    private var appVersionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "v\(version) (\(build))"
+    }
+
+    private func formatEpisodeTime(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0:00" }
+        let value = max(Int(seconds.rounded()), 0)
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }
 

@@ -298,7 +298,8 @@ private final class PodcastBacklogStore: ObservableObject {
                         feedURL: item.feedURL,
                         episodeGUID: item.episodeGUID,
                         transcript: analysis.transcript,
-                        summary: analysis.summary
+                        summary: analysis.summary,
+                        durationSeconds: analysis.duration
                     )
                     episodeStore.saveEpisode(completed)
                     update(id) {
@@ -470,7 +471,8 @@ private final class PodcastBacklogStore: ObservableObject {
                 feedURL: imported.feedURL,
                 episodeGUID: imported.episodeGUID,
                 transcript: analysis.transcript,
-                summary: analysis.summary
+                summary: analysis.summary,
+                durationSeconds: analysis.duration
             )
             episodeStore.saveEpisode(completedEpisode)
             update(id) {

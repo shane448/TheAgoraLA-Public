@@ -779,8 +779,11 @@ final class OpenRouterClient: @unchecked Sendable {
     private func transcriptChunks(_ transcript: String, duration: Double) -> [String] {
         let words = transcript.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
         guard !words.isEmpty else { return [] }
-        let chunkSize = 2_800
+        let targetSections = duration >= 1_800
+            ? PodcastPromptPolicy.minimumCount(for: duration)
+            : max(2, min(4, PodcastPromptPolicy.minimumCount(for: duration)))
         let overlap = 160
+        let chunkSize = max(700, min(2_800, Int(ceil(Double(words.count) / Double(targetSections))) + overlap))
         var chunks: [String] = []
         var start = 0
         while start < words.count {

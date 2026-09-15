@@ -72,11 +72,24 @@ enum PodcastPromptPolicy {
 
     static func hasAdequateCoverage(_ prompts: [Prompt], duration: Double) -> Bool {
         guard duration >= 1_800, prompts.count >= 6 else { return true }
+        let regionCount = timelineRegionCount(promptCount: prompts.count, duration: duration)
         let regions = Set(prompts.map { prompt in
-            min(3, Int((prompt.timestampSeconds / max(duration, 1)) * 4))
+            min(regionCount - 1, Int((prompt.timestampSeconds / max(duration, 1)) * Double(regionCount)))
         })
+        let quarterCounts = Dictionary(grouping: prompts) { prompt in
+            min(3, Int((prompt.timestampSeconds / max(duration, 1)) * 4))
+        }.values.map(\.count)
+        let maximumPerQuarter = Int(ceil(Double(prompts.count) / 4.0))
         let latestPrompt = prompts.map(\.timestampSeconds).max() ?? 0
-        return regions.count == 4 && latestPrompt >= duration * 0.80
+        return regions.count == regionCount
+            && quarterCounts.allSatisfy { $0 <= maximumPerQuarter }
+            && latestPrompt >= duration * 0.80
+    }
+
+    static func timelineRegionCount(promptCount: Int, duration: Double) -> Int {
+        guard duration >= 1_800 else { return min(4, max(promptCount, 1)) }
+        let tenMinuteRegions = Int(ceil(duration / 600))
+        return min(max(promptCount, 1), max(4, min(8, tenMinuteRegions)))
     }
 
     static func transcriptAppearsComplete(_ transcript: String, duration: Double?) -> Bool {
@@ -634,7 +647,10 @@ final class AIService {
         let idealSpacing = max(duration / Double(max(desiredCount + 1, 2)), 30)
 
         // Seed strong questions from broad timeline regions before filling by quality.
-        let regionCount = min(4, desiredCount)
+        let regionCount = PodcastPromptPolicy.timelineRegionCount(
+            promptCount: desiredCount,
+            duration: duration
+        )
         let highestQuality = remaining.map(\.score).max() ?? 0
         let coverageCandidates = duration >= 1_800
             ? remaining
@@ -658,6 +674,7 @@ final class AIService {
         while selected.count < desiredCount, !remaining.isEmpty {
             let distinct = remaining.filter { candidate in
                 isDistinct(candidate, from: selected)
+                    && canAddToTimeline(candidate, selected: selected, desiredCount: desiredCount, duration: duration)
             }
             guard let highestQuality = distinct.map(\.score).max() else { break }
 
@@ -672,6 +689,20 @@ final class AIService {
             remaining.removeAll { $0.prompt.id == best.prompt.id }
         }
         return selected.map(\.prompt)
+    }
+
+    private func canAddToTimeline(
+        _ candidate: ValidatedCandidate,
+        selected: [ValidatedCandidate],
+        desiredCount: Int,
+        duration: Double
+    ) -> Bool {
+        guard duration >= 1_800 else { return true }
+        let quarter = min(3, Int((candidate.prompt.timestampSeconds / max(duration, 1)) * 4))
+        let quarterCount = selected.filter {
+            min(3, Int(($0.prompt.timestampSeconds / max(duration, 1)) * 4)) == quarter
+        }.count
+        return quarterCount < Int(ceil(Double(desiredCount) / 4.0))
     }
 
     private func isDistinct(

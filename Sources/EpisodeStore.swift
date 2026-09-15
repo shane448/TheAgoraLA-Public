@@ -90,7 +90,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -108,7 +109,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -124,7 +126,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -140,7 +143,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: sourceChanged ? nil : episode.transcript,
-            summary: sourceChanged ? nil : episode.summary
+            summary: sourceChanged ? nil : episode.summary,
+            durationSeconds: sourceChanged ? nil : episode.durationSeconds
         )
         persist()
     }
@@ -155,7 +159,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -170,7 +175,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -185,7 +191,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -200,7 +207,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: episode.summary
+            summary: episode.summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -212,7 +220,8 @@ final class EpisodeStore: ObservableObject {
         feedURL: URL?,
         episodeGUID: String?,
         transcript: String?,
-        summary: String?
+        summary: String?,
+        durationSeconds: Double?
     ) {
         let sourceChanged = !matchesResolvedEpisode(
             audioURL: audioURL,
@@ -228,7 +237,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: sourceChanged ? feedURL : (feedURL ?? episode.feedURL),
             episodeGUID: sourceChanged ? episodeGUID : (episodeGUID ?? episode.episodeGUID),
             transcript: transcript,
-            summary: summary
+            summary: summary,
+            durationSeconds: sourceChanged ? durationSeconds : (durationSeconds ?? episode.durationSeconds)
         )
         persist()
     }
@@ -258,7 +268,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
-            summary: summary
+            summary: summary,
+            durationSeconds: episode.durationSeconds
         )
         persist()
     }
@@ -276,7 +287,8 @@ final class EpisodeStore: ObservableObject {
             feedURL: episode.feedURL,
             episodeGUID: episode.episodeGUID,
             transcript: analysis.transcript,
-            summary: analysis.summary
+            summary: analysis.summary,
+            durationSeconds: analysis.duration
         )
         guard let url = Self.storageURL else {
             throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
@@ -286,6 +298,24 @@ final class EpisodeStore: ObservableObject {
         episode = updated
         syncActiveEpisodeIntoLibrary()
         persistLibrary()
+    }
+
+    func updateDuration(_ duration: Double) {
+        guard duration.isFinite, duration > 10,
+              abs((episode.durationSeconds ?? 0) - duration) > 1 else { return }
+        episode = Episode(
+            id: episode.id,
+            title: episode.title,
+            audioURL: episode.audioURL,
+            sourceURL: episode.sourceURL,
+            prompts: episode.prompts,
+            feedURL: episode.feedURL,
+            episodeGUID: episode.episodeGUID,
+            transcript: episode.transcript,
+            summary: episode.summary,
+            durationSeconds: duration
+        )
+        persist()
     }
 
     func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) {
