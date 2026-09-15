@@ -173,7 +173,7 @@ async function readResponseBytes(response: Response, maxBytes: number): Promise<
   return result;
 }
 
-async function assertPublicHTTPSURL(url: URL): Promise<void> {
+export async function assertPublicHTTPSURL(url: URL): Promise<void> {
   if (url.protocol !== "https:" || !url.hostname || url.username || url.password) {
     throw new Error("Only public HTTPS audio URLs are supported.");
   }
