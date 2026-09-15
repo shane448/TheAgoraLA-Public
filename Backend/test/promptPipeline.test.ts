@@ -131,5 +131,6 @@ describe("prompt distribution", () => {
     expect(selected).toHaveLength(8);
     expect(selected[0]!.time).toBeGreaterThan(34);
     expect(selected.at(-1)!.time).toBeGreaterThanOrEqual(2_480);
+    expect(new Set(selected.map((item) => Math.min(3, Math.floor(item.time / 3_246 * 4)))).size).toBe(4);
   });
 });

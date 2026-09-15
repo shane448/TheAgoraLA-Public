@@ -268,7 +268,9 @@ export function selectDistributedPrompts(
   const idealSpacing = Math.max(duration / Math.max(count + 1, 2), 30);
 
   const highestQuality = Math.max(0, ...remaining.map(weightedScore));
-  const coverageCandidates = remaining.filter((prompt) => weightedScore(prompt) >= highestQuality - 0.12);
+  const coverageCandidates = duration >= 1_800
+    ? remaining
+    : remaining.filter((prompt) => weightedScore(prompt) >= highestQuality - 0.12);
   const regionCount = Math.min(4, count);
   for (let region = 0; region < regionCount; region += 1) {
     const lowerBound = duration * region / regionCount;
@@ -311,7 +313,7 @@ function hasRequiredTimelineCoverage(prompts: EpisodePrompt[], duration: number)
   if (duration < 1_800 || prompts.length < 6) return true;
   const regions = new Set(prompts.map((prompt) => Math.min(3, Math.floor(prompt.time / Math.max(duration, 1) * 4))));
   const latestPrompt = Math.max(0, ...prompts.map((prompt) => prompt.time));
-  return regions.size >= 3 && latestPrompt >= duration * 0.70;
+  return regions.size === 4 && latestPrompt >= duration * 0.80;
 }
 
 function distributedScore(prompt: EpisodePrompt, selected: EpisodePrompt[], idealSpacing: number): number {

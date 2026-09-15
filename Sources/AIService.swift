@@ -76,7 +76,15 @@ enum PodcastPromptPolicy {
             min(3, Int((prompt.timestampSeconds / max(duration, 1)) * 4))
         })
         let latestPrompt = prompts.map(\.timestampSeconds).max() ?? 0
-        return regions.count >= 3 && latestPrompt >= duration * 0.70
+        return regions.count == 4 && latestPrompt >= duration * 0.80
+    }
+
+    static func transcriptAppearsComplete(_ transcript: String, duration: Double?) -> Bool {
+        let words = transcript.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        guard words >= 120 else { return false }
+        guard let duration, duration.isFinite, duration >= 600 else { return true }
+        let estimatedSpokenDuration = Double(words) / 2.6
+        return estimatedSpokenDuration >= duration * 0.35
     }
 }
 
@@ -337,7 +345,9 @@ final class AIService {
     ) async throws -> EpisodeAnalysisResult {
         let completeTranscript = transcript?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let usableTranscript = completeTranscript.map { wordCount($0) >= 120 ? $0 : nil } ?? nil
+        let usableTranscript = completeTranscript.flatMap {
+            PodcastPromptPolicy.transcriptAppearsComplete($0, duration: audioDuration) ? $0 : nil
+        }
         let resolvedTranscript: String
         let transcriptionDuration: Double?
         if let usableTranscript {
@@ -352,7 +362,7 @@ final class AIService {
         }
 
         let duration = resolvedDuration(
-            audioDuration: audioDuration ?? transcriptionDuration ?? 0,
+            audioDuration: transcriptionDuration ?? audioDuration ?? 0,
             transcript: resolvedTranscript
         )
         let automaticMinimum = PodcastPromptPolicy.minimumCount(for: duration)
@@ -626,7 +636,9 @@ final class AIService {
         // Seed strong questions from broad timeline regions before filling by quality.
         let regionCount = min(4, desiredCount)
         let highestQuality = remaining.map(\.score).max() ?? 0
-        let coverageCandidates = remaining.filter { $0.score >= highestQuality - 0.12 }
+        let coverageCandidates = duration >= 1_800
+            ? remaining
+            : remaining.filter { $0.score >= highestQuality - 0.12 }
         for region in 0..<regionCount {
             let lowerBound = duration * Double(region) / Double(regionCount)
             let upperBound = duration * Double(region + 1) / Double(regionCount)

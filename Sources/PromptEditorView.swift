@@ -626,7 +626,10 @@ struct PromptEditorView: View {
         defer { isPreparingTranscript = false }
         do {
             var transcript = preferredTranscript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if transcript.split(whereSeparator: { $0.isWhitespace }).count < 120,
+            if !PodcastPromptPolicy.transcriptAppearsComplete(
+                transcript,
+                duration: imported.durationSeconds
+            ),
                let source = imported.transcriptSource {
                 importStatusText = "Downloading the published transcript..."
                 transcript = (try? await PodcastImportService().downloadTranscript(from: source)) ?? ""
@@ -634,7 +637,10 @@ struct PromptEditorView: View {
 
             try Task.checkCancellation()
             var transcriptionDuration: Double?
-            if transcript.split(whereSeparator: { $0.isWhitespace }).count < 120 {
+            if !PodcastPromptPolicy.transcriptAppearsComplete(
+                transcript,
+                duration: imported.durationSeconds
+            ) {
                 let transcription = try await AIService().transcribeAudio(at: imported.audioURL) { status in
                     Task { @MainActor in
                         guard isPreparingTranscript else { return }
@@ -655,7 +661,7 @@ struct PromptEditorView: View {
             importStatusText = "Transcript saved. Building the episode brief and best questions..."
 
             let estimatedDuration = estimateDurationFromTranscript(transcript)
-            let effectiveDuration = [imported.durationSeconds, transcriptionDuration, estimatedDuration]
+            let effectiveDuration = [transcriptionDuration, imported.durationSeconds, estimatedDuration]
                 .compactMap { $0 }
                 .first { $0.isFinite && $0 > 10 }
             let analysis = try await AIService().analyzeEpisode(
@@ -703,6 +709,11 @@ struct PromptEditorView: View {
 
     @MainActor
     private func applyAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) throws {
+        let requiredCount = requiredPromptCount(duration: analysis.duration)
+        guard analysis.prompts.count >= requiredCount,
+              PodcastPromptPolicy.hasAdequateCoverage(analysis.prompts, duration: analysis.duration) else {
+            throw AIServiceError.noQualityPrompts
+        }
         try episodeStore.saveAnalysis(analysis, expectedAudioURL: expectedAudioURL)
         transcriptText = analysis.transcript
         summaryText = analysis.summary

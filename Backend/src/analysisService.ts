@@ -15,6 +15,14 @@ export interface AnalysisJobInput {
   model?: string;
 }
 
+export function transcriptAppearsComplete(transcript: string, duration?: number): boolean {
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 120) return false;
+  if (!duration || !Number.isFinite(duration) || duration < 600) return true;
+  const estimatedSpokenDuration = wordCount / 2.6;
+  return estimatedSpokenDuration >= duration * 0.35;
+}
+
 export async function processEpisodeAnalysis(options: {
   input: AnalysisJobInput;
   userID: string;
@@ -22,7 +30,7 @@ export async function processEpisodeAnalysis(options: {
   config: AppConfig;
 }) {
   let transcript = options.input.transcript?.replace(/\s+/g, " ").trim() ?? "";
-  if (transcript.split(/\s+/).filter(Boolean).length < 120 && options.input.transcript_url) {
+  if (!transcriptAppearsComplete(transcript, options.input.duration) && options.input.transcript_url) {
     try {
       transcript = await downloadRemoteTranscript(
         options.input.transcript_url,
@@ -32,7 +40,7 @@ export async function processEpisodeAnalysis(options: {
       if (!options.input.audio_url) throw error;
     }
   }
-  if (transcript.split(/\s+/).filter(Boolean).length < 120) {
+  if (!transcriptAppearsComplete(transcript, options.input.duration)) {
     if (!options.input.audio_url) throw new Error("A complete transcript or public audio URL is required.");
     transcript = await transcribeRemoteAudio(options.input.audio_url, options.openAI, options.config);
   }

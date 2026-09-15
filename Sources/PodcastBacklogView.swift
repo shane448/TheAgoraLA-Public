@@ -288,6 +288,7 @@ private final class PodcastBacklogStore: ObservableObject {
                     guard let analysis = snapshot.analysis else {
                         throw CloudAnalysisError.invalidResponse
                     }
+                    try validateAutomaticAnalysis(analysis)
                     let completed = Episode(
                         id: item.episodeID,
                         title: item.displayTitle,
@@ -459,6 +460,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 }
             )
             try Task.checkCancellation()
+            try validateAutomaticAnalysis(analysis)
             let completedEpisode = Episode(
                 id: original.episodeID,
                 title: imported.title,
@@ -487,6 +489,13 @@ private final class PodcastBacklogStore: ObservableObject {
 
     private func item(with id: UUID) -> PodcastBacklogItem? {
         items.first { $0.id == id }
+    }
+
+    private func validateAutomaticAnalysis(_ analysis: EpisodeAnalysisResult) throws {
+        guard analysis.prompts.count >= PodcastPromptPolicy.minimumCount(for: analysis.duration),
+              PodcastPromptPolicy.hasAdequateCoverage(analysis.prompts, duration: analysis.duration) else {
+            throw AIServiceError.noQualityPrompts
+        }
     }
 
     private func update(_ id: UUID, change: (inout PodcastBacklogItem) -> Void) {

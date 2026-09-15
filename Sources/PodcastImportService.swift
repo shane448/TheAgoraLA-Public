@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 enum PodcastSourceParser {
     static func urls(in text: String) -> [URL] {
@@ -110,7 +111,7 @@ struct PodcastImportService {
         }
 
         if sourceURL.host?.lowercased().contains("podcasts.apple.com") == true {
-            return try await importApplePodcast(from: sourceURL)
+            return await ensuringReliableDuration(try await importApplePodcast(from: sourceURL))
         }
 
         if isLikelyAudioURL(sourceURL) {
@@ -119,7 +120,7 @@ struct PodcastImportService {
                 .replacingOccurrences(of: "[-_]", with: " ", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let title = decodedTitle.flatMap { $0.isEmpty ? nil : $0 } ?? "Imported Episode"
-            return PodcastImportResult(
+            return await ensuringReliableDuration(PodcastImportResult(
                 title: title,
                 audioURL: sourceURL,
                 feedURL: nil,
@@ -127,17 +128,51 @@ struct PodcastImportService {
                 publisherSummary: nil,
                 transcriptSource: nil,
                 durationSeconds: nil
-            )
+            ))
         }
 
         if isKnownPodcastPlatform(sourceURL) {
-            return try await resolvePodcastPage(sourceURL)
+            return await ensuringReliableDuration(try await resolvePodcastPage(sourceURL))
         }
 
         do {
-            return try await importFeed(sourceURL, matching: nil)
+            return await ensuringReliableDuration(try await importFeed(sourceURL, matching: nil))
         } catch {
-            return try await resolvePodcastPage(sourceURL)
+            return await ensuringReliableDuration(try await resolvePodcastPage(sourceURL))
+        }
+    }
+
+    private func ensuringReliableDuration(_ imported: PodcastImportResult) async -> PodcastImportResult {
+        guard let duration = await measuredAudioDuration(for: imported.audioURL) else { return imported }
+        guard duration.isFinite, duration >= 1, duration <= 86_400 else { return imported }
+        return PodcastImportResult(
+            title: imported.title,
+            audioURL: imported.audioURL,
+            feedURL: imported.feedURL,
+            episodeGUID: imported.episodeGUID,
+            publisherSummary: imported.publisherSummary,
+            transcriptSource: imported.transcriptSource,
+            durationSeconds: duration
+        )
+    }
+
+    private func measuredAudioDuration(for audioURL: URL) async -> Double? {
+        await withTaskGroup(of: Double?.self) { group in
+            group.addTask {
+                let asset = AVURLAsset(
+                    url: audioURL,
+                    options: [AVURLAssetPreferPreciseDurationAndTimingKey: false]
+                )
+                guard let durationTime = try? await asset.load(.duration) else { return nil }
+                return durationTime.seconds
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                return nil
+            }
+            let duration = await group.next() ?? nil
+            group.cancelAll()
+            return duration
         }
     }
 
