@@ -96,6 +96,30 @@ private final class PodcastBacklogStore: ObservableObject {
     var hasStartableItems: Bool { items.contains { $0.status == .waiting || $0.status == .failed } }
     var completedCount: Int { items.filter { $0.status == .complete }.count }
 
+    func auditCompletedEpisodes(episodeStore: EpisodeStore) {
+        var rebuildCount = 0
+        for index in items.indices where items[index].status == .complete {
+            guard let episode = episodeStore.savedEpisodes.first(where: { $0.id == items[index].episodeID }) else {
+                continue
+            }
+            let transcriptWords = episode.transcript?.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count ?? 0
+            let estimatedDuration = transcriptWords > 0 ? Double(transcriptWords) / 2.6 : 0
+            let duration = items[index].durationSeconds ?? estimatedDuration
+            let minimumCount = PodcastPromptPolicy.minimumCount(for: duration)
+            let hasCoverage = PodcastPromptPolicy.hasAdequateCoverage(episode.prompts, duration: duration)
+            guard episode.prompts.count < minimumCount || !hasCoverage else { continue }
+
+            items[index].status = .waiting
+            items[index].jobID = nil
+            items[index].durationSeconds = duration > 10 ? duration : items[index].durationSeconds
+            items[index].errorMessage = "This earlier analysis needs stronger coverage. It is ready to rebuild with more questions across the full episode."
+            rebuildCount += 1
+        }
+        guard rebuildCount > 0 else { return }
+        persist()
+        notice = "Found \(rebuildCount) episode\(rebuildCount == 1 ? "" : "s") that needs better prompt coverage. Tap Analyze Backlog to rebuild it."
+    }
+
     @discardableResult
     func addLinks(from entries: [String]) -> Bool {
         let filledEntries = entries.enumerated().filter {
@@ -278,6 +302,7 @@ private final class PodcastBacklogStore: ObservableObject {
                     episodeStore.saveEpisode(completed)
                     update(id) {
                         $0.status = .complete
+                        $0.durationSeconds = analysis.duration
                         $0.errorMessage = nil
                     }
                 }
@@ -448,6 +473,7 @@ private final class PodcastBacklogStore: ObservableObject {
             episodeStore.saveEpisode(completedEpisode)
             update(id) {
                 $0.status = .complete
+                $0.durationSeconds = analysis.duration
                 $0.errorMessage = nil
             }
         } catch {
@@ -538,6 +564,7 @@ struct PodcastBacklogView: View {
         }
         .task {
             await episodeStore.loadLibraryIfNeeded()
+            backlog.auditCompletedEpisodes(episodeStore: episodeStore)
             while !Task.isCancelled {
                 await backlog.refreshAll(episodeStore: episodeStore)
                 try? await Task.sleep(nanoseconds: backlog.hasActiveJobs ? 8_000_000_000 : 15_000_000_000)
@@ -826,6 +853,14 @@ private struct PodcastBacklogRow: View {
                             Label("Remove", systemImage: "trash")
                         }
                         .font(AgoraTheme.buttonFont)
+                    }
+                }
+
+                if item.status == .complete {
+                    HStack {
+                        Button("Reanalyze", action: onRetry)
+                            .buttonStyle(AgoraOutlineButtonStyle())
+                        Spacer()
                     }
                 }
             }

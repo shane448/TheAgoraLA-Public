@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { selectDistributedPrompts, validateAndRankPrompts, type EpisodePrompt } from "../src/promptPipeline.js";
+import {
+  minimumPromptCountForDuration,
+  selectDistributedPrompts,
+  validateAndRankPrompts,
+  type EpisodePrompt,
+} from "../src/promptPipeline.js";
 
 const evidence = "The host argues that attention is a form of respect because it allows another person's reasoning to change your mind.";
 const transcript = `${evidence} Later, the guest distinguishes passive hearing from active listening by requiring the listener to reconstruct the argument before responding.`;
@@ -60,6 +65,10 @@ describe("prompt quality gates", () => {
 });
 
 describe("prompt distribution", () => {
+  it("requires eight substantive checks for a 54-minute episode", () => {
+    expect(minimumPromptCountForDuration(54 * 60 + 6)).toBe(8);
+  });
+
   it("spreads similarly strong learning moments instead of clustering them", () => {
     const candidates = [
       prompt({
@@ -104,5 +113,23 @@ describe("prompt distribution", () => {
     const selected = selectDistributedPrompts([strongest, nearby, distant], 2, 600);
     expect(selected).toContain(nearby);
     expect(selected).not.toContain(distant);
+  });
+
+  it("covers a long episode instead of selecting opening prompts", () => {
+    const times = [34, 420, 760, 1_080, 1_420, 1_760, 2_100, 2_480, 2_850, 3_150];
+    const concepts = [
+      "attention and respect", "tradition and reform", "community practices", "moral imagination",
+      "historical interpretation", "institutional responsibility", "personal discipline", "social repair",
+      "hopeful action", "the concluding challenge",
+    ];
+    const candidates = times.map((time, index) => prompt({
+      time,
+      question: `What does the guest argue about ${concepts[index]} in this part of the discussion?`,
+      expected_answer: `The discussion develops ${concepts[index]} through a distinct claim, supporting example, and consequence for listeners.`,
+    }));
+    const selected = selectDistributedPrompts(candidates, 8, 3_246);
+    expect(selected).toHaveLength(8);
+    expect(selected[0]!.time).toBeGreaterThan(34);
+    expect(selected.at(-1)!.time).toBeGreaterThanOrEqual(2_480);
   });
 });

@@ -53,6 +53,33 @@ struct EpisodeAnalysisResult {
     let contentDepthLabel: String
 }
 
+enum PodcastPromptPolicy {
+    static func minimumCount(for duration: Double) -> Int {
+        switch duration {
+        case ..<900: return 3
+        case ..<1_800: return 4
+        case ..<2_700: return 6
+        case ..<3_900: return 8
+        case ..<5_400: return 10
+        default: return 12
+        }
+    }
+
+    static func leadIn(for duration: Double) -> Double {
+        guard duration >= 1_800 else { return 0 }
+        return min(180, max(120, duration * 0.04))
+    }
+
+    static func hasAdequateCoverage(_ prompts: [Prompt], duration: Double) -> Bool {
+        guard duration >= 1_800, prompts.count >= 6 else { return true }
+        let regions = Set(prompts.map { prompt in
+            min(3, Int((prompt.timestampSeconds / max(duration, 1)) * 4))
+        })
+        let latestPrompt = prompts.map(\.timestampSeconds).max() ?? 0
+        return regions.count >= 3 && latestPrompt >= duration * 0.70
+    }
+}
+
 struct EpisodeLearningPlan: Decodable {
     struct Priority: Decodable {
         let id: String
@@ -328,13 +355,15 @@ final class AIService {
             audioDuration: audioDuration ?? transcriptionDuration ?? 0,
             transcript: resolvedTranscript
         )
+        let automaticMinimum = PodcastPromptPolicy.minimumCount(for: duration)
         progress("Scanning every section of the transcript in parallel...")
         let editorial: FastEpisodeAnalysisEnvelope
         do {
             let fastData = try await personalAI.analyzeEpisodeFast(
                 transcript: resolvedTranscript,
                 duration: duration,
-                desiredCount: desiredCount
+                desiredCount: desiredCount,
+                automaticMinimum: automaticMinimum
             )
             guard let decoded = try? JSONDecoder().decode(FastEpisodeAnalysisEnvelope.self, from: fastData),
                   !decoded.priorities.isEmpty,
@@ -364,18 +393,37 @@ final class AIService {
             recommendedPromptCount: editorial.recommendedPromptCount,
             priorities: editorial.priorities
         )
-        let recommendedCount = automaticPromptCount(learningPlan: learningPlan)
+        let recommendedCount = automaticPromptCount(learningPlan: learningPlan, duration: duration)
         let requestedCount = desiredCount.map { max(3, min(12, $0)) } ?? recommendedCount
         progress("Verifying evidence and selecting the strongest questions...")
-        let validated = editorial.prompts.compactMap {
+        var validated = editorial.prompts.compactMap {
             validate($0, transcript: resolvedTranscript, duration: duration)
         }
-        let promptValues = selectBestCandidates(
+        var promptValues = selectBestCandidates(
             validated,
             desiredCount: requestedCount,
             duration: duration
         )
-        guard !promptValues.isEmpty else { throw AIServiceError.noQualityPrompts }
+        if promptValues.count < requestedCount || !PodcastPromptPolicy.hasAdequateCoverage(promptValues, duration: duration) {
+            progress("Strengthening coverage across the complete episode...")
+            if let supplemental = try? await fetchPromptCandidates(
+                transcript: resolvedTranscript,
+                duration: duration,
+                count: min(20, max(12, requestedCount * 2)),
+                learningPlan: learningPlan
+            ) {
+                validated.append(contentsOf: supplemental)
+                promptValues = selectBestCandidates(
+                    validated,
+                    desiredCount: requestedCount,
+                    duration: duration
+                )
+            }
+        }
+        guard promptValues.count == requestedCount,
+              PodcastPromptPolicy.hasAdequateCoverage(promptValues, duration: duration) else {
+            throw AIServiceError.noQualityPrompts
+        }
         let summaryValue = editorial.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard wordCount(summaryValue) >= 30 else { throw AIServiceError.invalidResponse }
         return EpisodeAnalysisResult(
@@ -395,7 +443,7 @@ final class AIService {
     ) async throws -> EpisodeAnalysisResult {
         async let summaryTask = personalAI.summarize(transcript: transcript)
         let learningPlan = try await personalAI.analyzeLearningPlan(transcript: transcript, duration: duration)
-        let recommendedCount = automaticPromptCount(learningPlan: learningPlan)
+        let recommendedCount = automaticPromptCount(learningPlan: learningPlan, duration: duration)
         let requestedCount = desiredCount.map { max(3, min(12, $0)) } ?? recommendedCount
         async let promptsTask = generatePersonalPrompts(
             transcript: transcript,
@@ -557,6 +605,8 @@ final class AIService {
         }
 
         guard let answerEnd = answerEndCandidates.max(), answerEnd.isFinite else { return nil }
+        let leadIn = PodcastPromptPolicy.leadIn(for: duration)
+        guard leadIn == 0 || answerEnd >= leadIn else { return nil }
         let listeningBuffer = min(12, max(6, duration * 0.0025))
         let earliestUsefulPrompt = min(20, max(6, duration * 0.03))
         return min(duration, max(answerEnd + listeningBuffer, earliestUsefulPrompt))
@@ -568,20 +618,34 @@ final class AIService {
         duration: Double
     ) -> [Prompt] {
         var selected: [ValidatedCandidate] = []
-        var remaining = candidates
+        let leadIn = PodcastPromptPolicy.leadIn(for: duration)
+        let afterIntroduction = candidates.filter { $0.prompt.timestampSeconds >= leadIn }
+        var remaining = leadIn > 0 ? afterIntroduction : candidates
         let idealSpacing = max(duration / Double(max(desiredCount + 1, 2)), 30)
+
+        // Seed strong questions from broad timeline regions before filling by quality.
+        let regionCount = min(4, desiredCount)
+        let highestQuality = remaining.map(\.score).max() ?? 0
+        let coverageCandidates = remaining.filter { $0.score >= highestQuality - 0.12 }
+        for region in 0..<regionCount {
+            let lowerBound = duration * Double(region) / Double(regionCount)
+            let upperBound = duration * Double(region + 1) / Double(regionCount)
+            let regional = coverageCandidates.filter { candidate in
+                candidate.prompt.timestampSeconds >= lowerBound
+                    && (region == regionCount - 1
+                        ? candidate.prompt.timestampSeconds <= upperBound
+                        : candidate.prompt.timestampSeconds < upperBound)
+                    && isDistinct(candidate, from: selected)
+            }
+            if let best = regional.max(by: { $0.score < $1.score }) {
+                selected.append(best)
+                remaining.removeAll { $0.prompt.id == best.prompt.id }
+            }
+        }
 
         while selected.count < desiredCount, !remaining.isEmpty {
             let distinct = remaining.filter { candidate in
-                selected.allSatisfy { existing in
-                    jaccardSimilarity(
-                        meaningfulTokens(existing.prompt.question),
-                        meaningfulTokens(candidate.prompt.question)
-                    ) < 0.68 && jaccardSimilarity(
-                        meaningfulTokens(existing.prompt.expectedAnswer),
-                        meaningfulTokens(candidate.prompt.expectedAnswer)
-                    ) < 0.76
-                }
+                isDistinct(candidate, from: selected)
             }
             guard let highestQuality = distinct.map(\.score).max() else { break }
 
@@ -596,6 +660,21 @@ final class AIService {
             remaining.removeAll { $0.prompt.id == best.prompt.id }
         }
         return selected.map(\.prompt)
+    }
+
+    private func isDistinct(
+        _ candidate: ValidatedCandidate,
+        from selected: [ValidatedCandidate]
+    ) -> Bool {
+        selected.allSatisfy { existing in
+            jaccardSimilarity(
+                meaningfulTokens(existing.prompt.question),
+                meaningfulTokens(candidate.prompt.question)
+            ) < 0.68 && jaccardSimilarity(
+                meaningfulTokens(existing.prompt.expectedAnswer),
+                meaningfulTokens(candidate.prompt.expectedAnswer)
+            ) < 0.76
+        }
     }
 
     private func selectionScore(
@@ -616,10 +695,13 @@ final class AIService {
             + (coversNewPriority ? 0.05 : 0)
     }
 
-    private func automaticPromptCount(learningPlan: EpisodeLearningPlan) -> Int {
+    private func automaticPromptCount(learningPlan: EpisodeLearningPlan, duration: Double) -> Int {
         let modelCount = max(3, min(12, learningPlan.recommendedPromptCount))
-        let priorityCap = max(3, min(12, learningPlan.priorities.count))
-        return min(modelCount, priorityCap)
+        let lengthMinimum = PodcastPromptPolicy.minimumCount(for: duration)
+        let depthMinimum = learningPlan.contentDepthScore >= 0.78
+            ? min(12, lengthMinimum + 1)
+            : lengthMinimum
+        return max(modelCount, depthMinimum)
     }
 
     private func decodeGeneratedPrompts(from data: Data) -> [GeneratedPrompt] {

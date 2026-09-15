@@ -30,6 +30,9 @@ struct InteractivePromptView: View {
                         .foregroundColor(AgoraTheme.inkMuted)
 
                     TextEditor(text: $viewModel.answerText)
+                        .scrollContentBackground(.hidden)
+                        .foregroundColor(AgoraTheme.ink)
+                        .background(Color.clear)
                         .frame(height: 120)
                         .padding(10)
                         .background(Color.white.opacity(0.8))

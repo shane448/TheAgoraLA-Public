@@ -174,6 +174,9 @@ struct PromptEditorView: View {
                         .foregroundColor(AgoraTheme.inkMuted)
                     if transcriptExpanded {
                         TextEditor(text: $transcriptText)
+                            .scrollContentBackground(.hidden)
+                            .foregroundColor(AgoraTheme.ink)
+                            .background(Color.clear)
                             .frame(minHeight: 200)
                             .padding(10)
                             .background(Color.white.opacity(0.85))
@@ -484,7 +487,13 @@ struct PromptEditorView: View {
             }
             let alreadyPrepared = !sourceChanged
                 && (preferredTranscript?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 120
-                && !episodeStore.episode.prompts.isEmpty
+                && episodeStore.episode.prompts.count >= requiredPromptCount(
+                    duration: imported.durationSeconds ?? estimateDurationFromTranscript(preferredTranscript ?? "")
+                )
+                && PodcastPromptPolicy.hasAdequateCoverage(
+                    episodeStore.episode.prompts,
+                    duration: imported.durationSeconds ?? estimateDurationFromTranscript(preferredTranscript ?? "")
+                )
                 && !(episodeStore.episode.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if alreadyPrepared {
                 importStatusText = "Episode loaded instantly. Its saved transcript, brief, and prompts are ready."
@@ -733,6 +742,11 @@ struct PromptEditorView: View {
         return max(180, min(86_400, estimated))
     }
 
+    private func requiredPromptCount(duration: Double) -> Int {
+        if promptCountMode == .manual { return selectedPromptCount }
+        return PodcastPromptPolicy.minimumCount(for: duration)
+    }
+
     private func addPrompt() {
         guard let timestamp = Double(newTimestamp), timestamp.isFinite,
               timestamp >= 1, timestamp <= promptEditorDurationSeconds else { return }
@@ -866,6 +880,9 @@ private struct PromptRow: View {
 
                     if showFullQuestion {
                         TextEditor(text: $question)
+                            .scrollContentBackground(.hidden)
+                            .foregroundColor(AgoraTheme.ink)
+                            .background(Color.clear)
                             .frame(height: 130)
                             .agoraFieldStyle()
                     } else {
@@ -889,6 +906,9 @@ private struct PromptRow: View {
 
                     if showFullAnswer {
                         TextEditor(text: $expectedAnswer)
+                            .scrollContentBackground(.hidden)
+                            .foregroundColor(AgoraTheme.ink)
+                            .background(Color.clear)
                             .frame(height: 130)
                             .agoraFieldStyle()
                     } else {

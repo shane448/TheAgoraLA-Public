@@ -121,7 +121,8 @@ final class OpenRouterClient: @unchecked Sendable {
     func analyzeEpisodeFast(
         transcript: String,
         duration: Double,
-        desiredCount: Int?
+        desiredCount: Int?,
+        automaticMinimum: Int
     ) async throws -> Data {
         let chunks = transcriptChunks(transcript, duration: duration)
         let batches = try await mapConcurrently(chunks, maximumConcurrentRequests: 3) { [self] index, chunk in
@@ -143,7 +144,11 @@ final class OpenRouterClient: @unchecked Sendable {
         guard ideas.count >= 3 else { throw OpenRouterClientError.invalidResponse }
 
         let requestedCount = desiredCount.map { max(3, min(12, $0)) }
-        let automaticCandidateCount = max(10, min(18, Int((duration / 600).rounded(.up)) + 6))
+        let automaticCandidateCount = max(
+            automaticMinimum * 2,
+            10,
+            min(18, Int((duration / 600).rounded(.up)) + 6)
+        )
         let candidateCount = min(
             18,
             ideas.count,
@@ -154,6 +159,7 @@ final class OpenRouterClient: @unchecked Sendable {
             ideasJSON: encodedIdeas,
             duration: duration,
             requestedCount: requestedCount,
+            automaticMinimum: automaticMinimum,
             candidateCount: candidateCount
         )
     }
@@ -214,6 +220,7 @@ final class OpenRouterClient: @unchecked Sendable {
         ideasJSON: String,
         duration: Double,
         requestedCount: Int?,
+        automaticMinimum: Int,
         candidateCount: Int
     ) async throws -> Data {
         let prioritySchema: [String: Any] = [
@@ -260,20 +267,29 @@ final class OpenRouterClient: @unchecked Sendable {
             "properties": [
                 "summary": ["type": "string"],
                 "content_depth_score": scoreNumberSchema,
-                "recommended_prompt_count": ["type": "integer", "minimum": 3, "maximum": min(12, candidateCount)],
-                "priorities": ["type": "array", "minItems": 3, "maxItems": 15, "items": prioritySchema],
+                "recommended_prompt_count": [
+                    "type": "integer",
+                    "minimum": min(automaticMinimum, candidateCount),
+                    "maximum": min(12, candidateCount),
+                ],
+                "priorities": [
+                    "type": "array",
+                    "minItems": min(automaticMinimum, candidateCount),
+                    "maxItems": 15,
+                    "items": prioritySchema,
+                ],
                 "prompts": ["type": "array", "minItems": candidateCount, "maxItems": candidateCount, "items": promptSchema],
             ],
         ]
         let countInstruction = requestedCount.map {
             "Use the listener's manual final count of \($0) prompts."
-        } ?? "Choose the final prompt count from the episode's actual learning density."
+        } ?? "Choose the final prompt count from the episode's actual learning density, with at least \(automaticMinimum) for an episode of this length."
         return try await structuredCompletion(
             name: "complete_episode_editorial_selection",
             system: """
             You are the senior learning editor for a podcast listening app. Compare evidence from every section before selecting the episode's most consequential ideas. Write a precise 100-170 word summary and difficult but fair recall questions that test attentive listening. Questions must name distinctive people, concepts, arguments, examples, events, or causal claims from this episode. Expected answers must directly answer their exact question using only supplied podcast evidence. Reject stock questions, opinions, trivia, ads, vague summaries, and repeated ideas.
 
-            Recommend the final number of prompts from episode length, conceptual density, complexity, and the number of genuinely important learning moments. Dense or difficult episodes should receive more prompts; light or repetitive episodes should receive fewer. Choose the strongest key moments first. When important moments are similarly valuable, distribute them regularly through the beginning, middle, and end rather than concentrating them in one passage. Never force even spacing, invent filler, or choose a weaker idea solely to fill a time region. Set each prompt time after the latest evidence needed to answer it. Set passes_quality_gates true only when every score is at least 0.78.
+            Recommend the final number of prompts from episode length, conceptual density, complexity, and the number of genuinely important learning moments. As a baseline, use 3 for under 15 minutes, 4 for 15-29 minutes, 6 for 30-44 minutes, 8 for 45-64 minutes, 10 for 65-89 minutes, and 12 for 90 minutes or longer; increase within the limit when the material is especially dense. Choose the strongest key moments first. When important moments are similarly valuable, distribute them regularly through the beginning, middle, and end rather than concentrating them in one passage. Long episodes must include substantive later developments and conclusions, not just opening material. Never force even spacing, invent filler, or choose a weaker idea solely to fill a time region. Set each prompt time after the latest evidence needed to answer it. Set passes_quality_gates true only when every score is at least 0.78.
             """,
             user: """
             Episode duration: \(Int(duration)) seconds.
@@ -291,6 +307,7 @@ final class OpenRouterClient: @unchecked Sendable {
 
     func analyzeLearningPlan(transcript: String, duration: Double) async throws -> EpisodeLearningPlan {
         let transcriptWithPositions = annotatedTranscript(transcript, duration: duration)
+        let automaticMinimum = PodcastPromptPolicy.minimumCount(for: duration)
         let system = """
         You are the lead curriculum editor for a serious podcast learning product. Read the complete transcript before making decisions. First separate the episode's consequential teaching from ads, introductions, asides, repeated phrasing, and trivia. Then rank the smallest set of ideas a careful listener should retain to genuinely understand the episode.
 
@@ -299,7 +316,7 @@ final class OpenRouterClient: @unchecked Sendable {
         let user = """
         Build the learning map for this \(Int(duration / 60))-minute episode.
 
-        Return 3-15 priorities in descending importance. Each priority needs a short unique id, a specific title, a concise reason it matters to understanding this episode, an exact evidence quote, and the approximate position-marker times containing that evidence. Recommend 3-12 final prompts based jointly on duration, content depth, complexity, and the number of genuinely important ideas. The recommendation should be higher for a dense episode with many distinct learning moments and lower for a light or repetitive one.
+        Return \(automaticMinimum)-15 priorities in descending importance. Each priority needs a short unique id, a specific title, a concise reason it matters to understanding this episode, an exact evidence quote, and the approximate position-marker times containing that evidence. Recommend \(automaticMinimum)-12 final prompts based jointly on duration, content depth, complexity, and the number of genuinely important ideas. Cover substantive developments throughout the full timeline, including later conclusions, while rejecting introductions and filler.
 
         COMPLETE TRANSCRIPT WITH POSITION MARKERS:
         \(transcriptWithPositions)
@@ -311,10 +328,10 @@ final class OpenRouterClient: @unchecked Sendable {
             "required": ["content_depth_score", "recommended_prompt_count", "priorities"],
             "properties": [
                 "content_depth_score": ["type": "number", "minimum": 0, "maximum": 1],
-                "recommended_prompt_count": ["type": "integer", "minimum": 3, "maximum": 12],
+                "recommended_prompt_count": ["type": "integer", "minimum": automaticMinimum, "maximum": 12],
                 "priorities": [
                     "type": "array",
-                    "minItems": 3,
+                    "minItems": automaticMinimum,
                     "maxItems": 15,
                     "items": [
                         "type": "object",
