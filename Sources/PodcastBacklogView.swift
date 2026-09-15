@@ -59,6 +59,7 @@ private final class PodcastBacklogStore: ObservableObject {
     @Published private(set) var items: [PodcastBacklogItem]
     @Published private(set) var isSubmitting = false
     @Published private(set) var isRefreshing = false
+    @Published private(set) var isUsingDirectFallback = false
     @Published var notice = ""
 
     private static var storageURL: URL? {
@@ -79,6 +80,10 @@ private final class PodcastBacklogStore: ObservableObject {
                 var item = storedItem
                 if item.errorMessage?.localizedCaseInsensitiveContains("application not found") == true {
                     item.errorMessage = CloudAnalysisError.backgroundServiceUnavailable
+                }
+                if item.status.isActive, item.jobID == nil {
+                    item.status = .waiting
+                    item.errorMessage = "The previous preparation was interrupted. This podcast is ready to try again."
                 }
                 return item
             }
@@ -210,9 +215,11 @@ private final class PodcastBacklogStore: ObservableObject {
         do {
             try await CloudAnalysisClient().verifyAvailability()
         } catch {
-            notice = error.localizedDescription
+            isUsingDirectFallback = true
+            await prepareDirectly(ids: ids, episodeStore: episodeStore)
             return
         }
+        isUsingDirectFallback = false
 
         notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
 
@@ -355,6 +362,103 @@ private final class PodcastBacklogStore: ObservableObject {
         }
     }
 
+    private func prepareDirectly(ids: [UUID], episodeStore: EpisodeStore) async {
+        await episodeStore.loadLibraryIfNeeded()
+        for (offset, id) in ids.enumerated() {
+            notice = "Cloud background processing is unavailable. Preparing podcast \(offset + 1) of \(ids.count) through your connected AI; keep Agora open."
+            await prepareDirectly(id: id, episodeStore: episodeStore)
+        }
+
+        let completed = ids.filter { id in item(with: id)?.status == .complete }.count
+        let failures = ids.count - completed
+        if failures == 0 {
+            notice = "Your backlog is ready. All \(completed) podcast\(completed == 1 ? " was" : "s were") prepared through your connected AI."
+        } else if completed > 0 {
+            notice = "Prepared \(completed) podcast\(completed == 1 ? "" : "s"). Review the \(failures) item\(failures == 1 ? "" : "s") marked Needs attention."
+        } else {
+            notice = "Direct preparation could not finish. Review the message under the first podcast, then tap Analyze Backlog to retry."
+        }
+    }
+
+    private func prepareDirectly(id: UUID, episodeStore: EpisodeStore) async {
+        guard let original = item(with: id) else { return }
+        update(id) {
+            $0.status = .resolving
+            $0.jobID = nil
+            $0.errorMessage = "Finding the episode and its published transcript..."
+        }
+
+        do {
+            let imported: PodcastImportResult
+            if let audioURL = original.audioURL {
+                imported = PodcastImportResult(
+                    title: original.displayTitle,
+                    audioURL: audioURL,
+                    feedURL: original.feedURL,
+                    episodeGUID: original.episodeGUID,
+                    publisherSummary: original.publisherSummary,
+                    transcriptSource: original.transcriptSource,
+                    durationSeconds: original.durationSeconds
+                )
+            } else {
+                imported = try await PodcastImportService().importMetadata(from: original.sourceURL)
+            }
+
+            update(id) {
+                $0.title = imported.title
+                $0.audioURL = imported.audioURL
+                $0.feedURL = imported.feedURL
+                $0.episodeGUID = imported.episodeGUID
+                $0.publisherSummary = imported.publisherSummary
+                $0.transcriptURL = imported.transcriptSource?.url
+                $0.transcriptType = imported.transcriptSource?.type
+                $0.durationSeconds = imported.durationSeconds
+                $0.status = .processing
+                $0.errorMessage = "Reading the complete episode..."
+            }
+
+            var publishedTranscript: String?
+            if let source = imported.transcriptSource {
+                publishedTranscript = try? await PodcastImportService().downloadTranscript(from: source)
+            }
+            let analysis = try await AIService().analyzeEpisode(
+                title: imported.title,
+                audioURL: imported.audioURL,
+                transcript: publishedTranscript,
+                audioDuration: imported.durationSeconds,
+                desiredCount: nil,
+                progress: { status in
+                    Task { @MainActor in
+                        self.update(id) { $0.errorMessage = status }
+                    }
+                }
+            )
+            try Task.checkCancellation()
+            let completedEpisode = Episode(
+                id: original.episodeID,
+                title: imported.title,
+                audioURL: imported.audioURL,
+                sourceURL: original.sourceURL,
+                prompts: analysis.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds },
+                feedURL: imported.feedURL,
+                episodeGUID: imported.episodeGUID,
+                transcript: analysis.transcript,
+                summary: analysis.summary
+            )
+            episodeStore.saveEpisode(completedEpisode)
+            update(id) {
+                $0.status = .complete
+                $0.errorMessage = nil
+            }
+        } catch {
+            update(id) {
+                $0.status = .failed
+                $0.jobID = nil
+                $0.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func item(with id: UUID) -> PodcastBacklogItem? {
         items.first { $0.id == id }
     }
@@ -464,14 +568,18 @@ struct PodcastBacklogView: View {
     private var introductionCard: some View {
         AgoraCard {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "cloud.fill")
+                Image(systemName: backlog.isUsingDirectFallback ? "iphone.gen3" : "cloud.fill")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(AgoraTheme.accent)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Cloud preparation continues")
+                    Text(backlog.isUsingDirectFallback ? "Direct preparation is running" : "Cloud preparation continues")
                         .font(AgoraTheme.cardTitleFont)
                         .foregroundColor(AgoraTheme.ink)
-                    Text("Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode.")
+                    Text(
+                        backlog.isUsingDirectFallback
+                            ? "Keep Agora open while each episode is prepared through your connected AI. Completed podcasts are saved immediately."
+                            : "Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode."
+                    )
                         .font(AgoraTheme.bodyFont)
                         .foregroundColor(AgoraTheme.inkMuted)
                 }
