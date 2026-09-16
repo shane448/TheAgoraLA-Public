@@ -354,7 +354,8 @@ final class AIService {
         transcript: String?,
         audioDuration: Double?,
         desiredCount: Int? = nil,
-        progress: @escaping @Sendable (String) -> Void = { _ in }
+        progress: @escaping @Sendable (String) -> Void = { _ in },
+        onTranscriptReady: @escaping @Sendable (String) async -> Void = { _ in }
     ) async throws -> EpisodeAnalysisResult {
         let completeTranscript = transcript?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -378,6 +379,7 @@ final class AIService {
             audioDuration: transcriptionDuration ?? audioDuration ?? 0,
             transcript: resolvedTranscript
         )
+        await onTranscriptReady(resolvedTranscript)
         let automaticMinimum = PodcastPromptPolicy.minimumCount(for: duration)
         progress("Scanning every section of the transcript in parallel...")
         let editorial: FastEpisodeAnalysisEnvelope
@@ -396,6 +398,11 @@ final class AIService {
             editorial = decoded
         } catch {
             try Task.checkCancellation()
+            if let networkError = error as? URLError,
+               [.timedOut, .networkConnectionLost, .notConnectedToInternet,
+                .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains(networkError.code) {
+                throw networkError
+            }
             if let providerError = error as? OpenRouterClientError {
                 switch providerError {
                 case .notConnected, .insufficientCredits, .authenticationExpired:

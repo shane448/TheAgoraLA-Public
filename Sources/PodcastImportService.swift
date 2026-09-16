@@ -105,6 +105,14 @@ enum PodcastImportError: LocalizedError {
 }
 
 struct PodcastImportService {
+    private static let networkSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 45
+        configuration.timeoutIntervalForResource = 180
+        return URLSession(configuration: configuration)
+    }()
+
     func importMetadata(from sourceURL: URL) async throws -> PodcastImportResult {
         guard sourceURL.scheme?.lowercased() == "https", sourceURL.host != nil else {
             throw PodcastImportError.invalidURL
@@ -528,18 +536,41 @@ struct PodcastImportService {
         acceptedTypes: [String]
     ) async throws -> (data: Data, finalURL: URL) {
         var request = URLRequest(url: url)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.timeoutInterval = 30
+        request.timeoutInterval = 45
         request.setValue(acceptedTypes.joined(separator: ", "), forHTTPHeaderField: "Accept")
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200...299).contains(http.statusCode),
-              data.count <= maximumBytes,
-              let finalURL = http.url else {
-            throw PodcastImportError.invalidResponse
+
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            do {
+                let (data, response) = try await Self.networkSession.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw PodcastImportError.invalidResponse
+                }
+                if [429, 500, 502, 503, 504].contains(http.statusCode), attempt < 2 {
+                    try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+                    continue
+                }
+                guard (200...299).contains(http.statusCode),
+                      data.count <= maximumBytes,
+                      let finalURL = http.url else {
+                    throw PodcastImportError.invalidResponse
+                }
+                return (data, finalURL)
+            } catch let error as URLError where attempt < 2 && Self.isTransient(error) {
+                try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+            }
         }
-        return (data, finalURL)
+        throw PodcastImportError.invalidResponse
+    }
+
+    private static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+             .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            return true
+        default:
+            return false
+        }
     }
 
     private func identifier(in text: String, pattern: String) -> String? {

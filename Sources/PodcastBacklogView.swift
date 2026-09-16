@@ -54,6 +54,41 @@ private struct PodcastBacklogItem: Identifiable, Codable {
     }
 }
 
+private enum PodcastTranscriptCheckpoint {
+    private static func fileURL(for episodeID: UUID) -> URL? {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else { return nil }
+        let directory = applicationSupport
+            .appendingPathComponent("TheAgoraLA", isDirectory: true)
+            .appendingPathComponent("backlog-transcripts", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("\(episodeID.uuidString).txt")
+    }
+
+    static func load(for episodeID: UUID) async -> String? {
+        await Task.detached(priority: .utility) {
+            guard let url = fileURL(for: episodeID) else { return nil }
+            return try? String(contentsOf: url, encoding: .utf8)
+        }.value
+    }
+
+    static func save(_ transcript: String, for episodeID: UUID) async {
+        await Task.detached(priority: .utility) {
+            guard let url = fileURL(for: episodeID) else { return }
+            try? transcript.write(to: url, atomically: true, encoding: .utf8)
+        }.value
+    }
+
+    static func remove(for episodeID: UUID) async {
+        await Task.detached(priority: .utility) {
+            guard let url = fileURL(for: episodeID) else { return }
+            try? FileManager.default.removeItem(at: url)
+        }.value
+    }
+}
+
 @MainActor
 private final class PodcastBacklogStore: ObservableObject {
     @Published private(set) var items: [PodcastBacklogItem]
@@ -340,6 +375,7 @@ private final class PodcastBacklogStore: ObservableObject {
                         durationSeconds: analysis.duration
                     )
                     episodeStore.saveEpisode(completed)
+                    await PodcastTranscriptCheckpoint.remove(for: item.episodeID)
                     update(id) {
                         $0.status = .complete
                         $0.durationSeconds = analysis.duration
@@ -384,8 +420,12 @@ private final class PodcastBacklogStore: ObservableObject {
     }
 
     func remove(_ id: UUID) {
+        let episodeID = item(with: id)?.episodeID
         items.removeAll { $0.id == id }
         persist()
+        if let episodeID {
+            Task { await PodcastTranscriptCheckpoint.remove(for: episodeID) }
+        }
     }
 
     private func submit(id: UUID, providerKey: String) async {
@@ -489,9 +529,16 @@ private final class PodcastBacklogStore: ObservableObject {
                 $0.errorMessage = "Reading the complete episode..."
             }
 
-            var publishedTranscript: String?
-            if let source = imported.transcriptSource {
+            var publishedTranscript = await PodcastTranscriptCheckpoint.load(for: original.episodeID)
+            if publishedTranscript == nil, let source = imported.transcriptSource {
                 publishedTranscript = try? await PodcastImportService().downloadTranscript(from: source)
+            }
+            if let publishedTranscript,
+               PodcastPromptPolicy.transcriptAppearsComplete(
+                   publishedTranscript,
+                   duration: imported.durationSeconds
+               ) {
+                await PodcastTranscriptCheckpoint.save(publishedTranscript, for: original.episodeID)
             }
             let analysis = try await AIService().analyzeEpisode(
                 title: imported.title,
@@ -503,6 +550,9 @@ private final class PodcastBacklogStore: ObservableObject {
                     Task { @MainActor in
                         self.update(id) { $0.errorMessage = status }
                     }
+                },
+                onTranscriptReady: { transcript in
+                    await PodcastTranscriptCheckpoint.save(transcript, for: original.episodeID)
                 }
             )
             try Task.checkCancellation()
@@ -520,16 +570,28 @@ private final class PodcastBacklogStore: ObservableObject {
                 durationSeconds: analysis.duration
             )
             episodeStore.saveEpisode(completedEpisode)
+            await PodcastTranscriptCheckpoint.remove(for: original.episodeID)
             update(id) {
                 $0.status = .complete
                 $0.durationSeconds = analysis.duration
                 $0.errorMessage = nil
             }
         } catch {
+            let checkpointed = await PodcastTranscriptCheckpoint.load(for: original.episodeID) != nil
+            let interruptedStage = item(with: id)?.errorMessage?
+                .replacingOccurrences(of: "...", with: "")
+                .lowercased() ?? "preparing this episode"
+            let networkError = error as? URLError
+            let interrupted = networkError.map {
+                [.timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains($0.code)
+            } ?? false
             update(id) {
                 $0.status = .failed
                 $0.jobID = nil
-                $0.errorMessage = error.localizedDescription
+                $0.errorMessage = interrupted
+                    ? "The connection was interrupted while \(interruptedStage). \(checkpointed ? "The transcript is saved, so Retry will skip downloading and transcribing the episode again." : "Any episode details already found are saved. Retry when reception improves.")"
+                    : error.localizedDescription
             }
         }
     }
@@ -600,7 +662,10 @@ struct PodcastBacklogView: View {
                                         if episodeStore.selectEpisode(id: item.episodeID) { dismiss() }
                                     }
                                 },
-                                onRetry: { backlog.retry(item.id) },
+                                onRetry: {
+                                    backlog.retry(item.id)
+                                    Task { await backlog.startAll(episodeStore: episodeStore) }
+                                },
                                 onRemove: {
                                     Task {
                                         if item.status == .complete {

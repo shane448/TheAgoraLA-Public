@@ -91,6 +91,20 @@ private final class ExportSessionBox: @unchecked Sendable {
 final class OpenRouterClient: @unchecked Sendable {
     private let chatURL = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private let transcriptionURL = URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!
+    private static let audioDownloadSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 900
+        return URLSession(configuration: configuration)
+    }()
+    private static let aiSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 600
+        return URLSession(configuration: configuration)
+    }()
 
     private struct ExtractedIdea: Codable {
         let id: String
@@ -561,7 +575,7 @@ final class OpenRouterClient: @unchecked Sendable {
     ) async throws -> TranscriptionResult {
         guard audioURL.scheme?.lowercased() == "https" else { throw OpenRouterClientError.audioUnavailable }
         progress("Downloading the episode audio...")
-        let staged = try await stageAudio(from: audioURL)
+        let staged = try await stageAudio(from: audioURL, progress: progress)
         defer { if staged.shouldRemove { try? FileManager.default.removeItem(at: staged.url) } }
 
         let asset = AVURLAsset(url: staged.url)
@@ -832,23 +846,46 @@ final class OpenRouterClient: @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func stageAudio(from url: URL) async throws -> (url: URL, shouldRemove: Bool) {
+    private func stageAudio(
+        from url: URL,
+        progress: @escaping @Sendable (String) -> Void
+    ) async throws -> (url: URL, shouldRemove: Bool) {
         if url.pathExtension.lowercased() == "m3u8" { return (url, false) }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 120
-        let (temporaryURL, response) = try await URLSession.shared.download(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw OpenRouterClientError.audioUnavailable
+        request.timeoutInterval = 180
+        var resumeData: Data?
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            do {
+                let (temporaryURL, response): (URL, URLResponse)
+                if let resumeData {
+                    (temporaryURL, response) = try await Self.audioDownloadSession.download(resumeFrom: resumeData)
+                } else {
+                    (temporaryURL, response) = try await Self.audioDownloadSession.download(for: request)
+                }
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    throw OpenRouterClientError.audioUnavailable
+                }
+                let extensionValue = normalizedAudioFormat(
+                    URL(fileURLWithPath: response.suggestedFilename ?? "").pathExtension.isEmpty
+                        ? url.pathExtension
+                        : URL(fileURLWithPath: response.suggestedFilename ?? "").pathExtension
+                )
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("agora-episode-\(UUID().uuidString).\(extensionValue)")
+                try FileManager.default.moveItem(at: temporaryURL, to: destination)
+                return (destination, true)
+            } catch let error as URLError where attempt < 2 && error.isTransientAgoraFailure {
+                resumeData = error.userInfo["NSURLSessionDownloadTaskResumeData"] as? Data
+                progress("Connection interrupted. Resuming the episode download...")
+                try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+            } catch let error as URLError where attempt < 2 && resumeData != nil && error.code != .cancelled {
+                resumeData = nil
+                progress("Restarting the episode download after a connection interruption...")
+                try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+            }
         }
-        let extensionValue = normalizedAudioFormat(
-            URL(fileURLWithPath: response.suggestedFilename ?? "").pathExtension.isEmpty
-                ? url.pathExtension
-                : URL(fileURLWithPath: response.suggestedFilename ?? "").pathExtension
-        )
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("agora-episode-\(UUID().uuidString).\(extensionValue)")
-        try FileManager.default.moveItem(at: temporaryURL, to: destination)
-        return (destination, true)
+        throw OpenRouterClientError.audioUnavailable
     }
 
     private func exportSegment(asset: AVAsset, start: Double, duration: Double, outputURL: URL) async throws {
@@ -922,7 +959,7 @@ final class OpenRouterClient: @unchecked Sendable {
             let data: Data
             let response: URLResponse
             do {
-                (data, response) = try await URLSession.shared.data(for: request)
+                (data, response) = try await Self.aiSession.data(for: request)
             } catch let error as URLError where attempt == 0 && error.isTransientAgoraFailure {
                 try await Task.sleep(nanoseconds: 900_000_000)
                 continue
