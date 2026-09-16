@@ -494,7 +494,7 @@ struct PlaybackSettingsView: View {
                     .disabled(viewModel.drivingPromptState != .idle)
 
                     if viewModel.selectedNarrationVoiceID != NarrationVoiceOption.automaticID {
-                        Button("Use Best Available") {
+                        Button("Use Natural AI Voice") {
                             viewModel.selectedNarrationVoiceID = NarrationVoiceOption.automaticID
                         }
                     }

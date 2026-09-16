@@ -7,6 +7,11 @@ private struct PromptHistorySnapshot: Codable {
     let encounteredPromptIDs: [UUID]
 }
 
+private enum NaturalNarrationError: Error {
+    case unavailable
+    case invalidResponse
+}
+
 struct NarrationVoiceOption: Identifiable, Hashable {
     static let automaticID = "automatic"
 
@@ -58,6 +63,10 @@ final class PlayerViewModel: NSObject, ObservableObject {
     let speechManager = SpeechRecognitionManager()
     let aiService = AIService()
     private let speechSynthesizer = AVSpeechSynthesizer()
+    private var naturalNarrationPlayer: AVAudioPlayer?
+    private var naturalNarrationTask: Task<Void, Never>?
+    private var activeNaturalNarrationID: UUID?
+    private var activeNaturalNarrationState: DrivingPromptState?
     private var cancellables = Set<AnyCancellable>()
 
     private var promptedIDs = Set<UUID>()
@@ -494,12 +503,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     func stopFeedbackNarration() {
         guard drivingPromptState == .speakingFeedback else { return }
-        speechWatchdogTask?.cancel()
-        speechWatchdogTask = nil
-        activeSpeechUtterance = nil
-        activeSpeechState = nil
+        cancelActiveNarration()
         shouldResumeFeedbackAfterInterruption = false
-        speechSynthesizer.stopSpeaking(at: .immediate)
         drivingPromptState = .idle
         drivingStatusText = "Feedback stopped. Review it below or continue the podcast."
     }
@@ -729,9 +734,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         speechWatchdogTask?.cancel()
         speechWatchdogTask = nil
         speechManager.stopRecording()
-        activeSpeechUtterance = nil
-        activeSpeechState = nil
-        speechSynthesizer.stopSpeaking(at: .immediate)
+        cancelActiveNarration()
         drivingPromptState = .idle
         drivingStatusText = "Hands-free paused while the app is in the background."
     }
@@ -757,9 +760,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
                 drivingStatusText = "Hands-free paused for another audio session."
             case .speakingFeedback:
                 shouldResumeFeedbackAfterInterruption = true
-                activeSpeechUtterance = nil
-                activeSpeechState = nil
-                speechSynthesizer.stopSpeaking(at: .immediate)
+                cancelActiveNarration()
                 drivingPromptState = .idle
                 drivingStatusText = "Feedback paused for another audio session."
             default:
@@ -797,11 +798,9 @@ final class PlayerViewModel: NSObject, ObservableObject {
         }
         drivingPromptState = .idle
         drivingStatusText = ""
-        activeSpeechUtterance = nil
-        activeSpeechState = nil
         handsFreePausedForInterruption = false
         shouldResumeFeedbackAfterInterruption = false
-        speechSynthesizer.stopSpeaking(at: .immediate)
+        cancelActiveNarration()
     }
 
     private func activatePrompt(_ prompt: Prompt, beginDriving: Bool) {
@@ -900,11 +899,125 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     private func speak(text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        activeSpeechUtterance = nil
-        activeSpeechState = nil
-        if speechSynthesizer.isSpeaking {
-            speechSynthesizer.stopSpeaking(at: .immediate)
+        cancelActiveNarration()
+
+        let expectedState = drivingPromptState
+        if selectedNarrationVoiceID == NarrationVoiceOption.automaticID,
+           let apiKey = AIAccountStore.apiKey(),
+           !apiKey.isEmpty {
+            startNaturalNarration(text: text, apiKey: apiKey, expectedState: expectedState)
+        } else {
+            startOnDeviceNarration(text: text, expectedState: expectedState)
         }
+    }
+
+    private func startNaturalNarration(
+        text: String,
+        apiKey: String,
+        expectedState: DrivingPromptState
+    ) {
+        let narrationID = UUID()
+        activeNaturalNarrationID = narrationID
+        activeNaturalNarrationState = expectedState
+
+        switch expectedState {
+        case .speakingFeedback:
+            drivingStatusText = "Preparing natural feedback voice..."
+        case .announcingPrompt, .retryingListening:
+            drivingStatusText = "Preparing natural voice..."
+        default:
+            break
+        }
+
+        naturalNarrationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let data = try await self.fetchNaturalNarration(text: text, apiKey: apiKey)
+                try Task.checkCancellation()
+                guard self.activeNaturalNarrationID == narrationID,
+                      self.activeNaturalNarrationState == expectedState,
+                      self.drivingPromptState == expectedState else { return }
+                try self.playNaturalNarration(data, narrationID: narrationID, expectedState: expectedState)
+                self.naturalNarrationTask = nil
+                if expectedState == .speakingFeedback {
+                    self.drivingStatusText = "Reading feedback..."
+                } else if expectedState == .announcingPrompt || expectedState == .retryingListening {
+                    self.drivingStatusText = "Reading prompt..."
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.activeNaturalNarrationID == narrationID,
+                      self.activeNaturalNarrationState == expectedState,
+                      self.drivingPromptState == expectedState else { return }
+                self.activeNaturalNarrationID = nil
+                self.activeNaturalNarrationState = nil
+                self.naturalNarrationTask = nil
+                self.startOnDeviceNarration(text: text, expectedState: expectedState)
+                if expectedState == .speakingFeedback {
+                    self.drivingStatusText = "Reading feedback with the on-device voice..."
+                } else if expectedState == .announcingPrompt || expectedState == .retryingListening {
+                    self.drivingStatusText = "Reading prompt with the on-device voice..."
+                }
+            }
+        }
+    }
+
+    private func fetchNaturalNarration(text: String, apiKey: String) async throws -> Data {
+        guard let url = URL(string: "https://openrouter.ai/api/v1/audio/speech") else {
+            throw NaturalNarrationError.unavailable
+        }
+        let input = String(text.prefix(4_000))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 18
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(AppLinks.home.absoluteString, forHTTPHeaderField: "HTTP-Referer")
+        request.setValue("Agora Interactive Podcast", forHTTPHeaderField: "X-Title")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "microsoft/mai-voice-2",
+            "input": input,
+            "voice": "en-US-Harper:MAI-Voice-2",
+            "response_format": "mp3",
+            "speed": 0.94,
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              http.value(forHTTPHeaderField: "Content-Type")?.lowercased().contains("audio") == true,
+              data.count > 1_000 else {
+            throw NaturalNarrationError.invalidResponse
+        }
+        return data
+    }
+
+    private func playNaturalNarration(
+        _ data: Data,
+        narrationID: UUID,
+        expectedState: DrivingPromptState
+    ) throws {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [])
+            try session.setActive(true, options: [])
+        } catch {
+            throw NaturalNarrationError.unavailable
+        }
+
+        let player = try AVAudioPlayer(data: data)
+        player.delegate = self
+        player.volume = 1
+        guard player.prepareToPlay(), player.play() else {
+            throw NaturalNarrationError.unavailable
+        }
+        naturalNarrationPlayer = player
+        activeNaturalNarrationID = narrationID
+        activeNaturalNarrationState = expectedState
+    }
+
+    private func startOnDeviceNarration(text: String, expectedState: DrivingPromptState) {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [])
@@ -912,15 +1025,33 @@ final class PlayerViewModel: NSObject, ObservableObject {
         } catch {}
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = selectedNarrationVoice()
-        utterance.rate = 0.46
-        utterance.pitchMultiplier = 0.98
+        utterance.rate = 0.47
+        utterance.pitchMultiplier = 1.0
         utterance.volume = 1.0
         utterance.preUtteranceDelay = 0.12
         utterance.postUtteranceDelay = 0.22
         activeSpeechUtterance = utterance
-        activeSpeechState = drivingPromptState
+        activeSpeechState = expectedState
         speechSynthesizer.speak(utterance)
-        startSpeechWatchdog(for: drivingPromptState, utterance: utterance)
+        startSpeechWatchdog(for: expectedState, utterance: utterance)
+    }
+
+    private func cancelActiveNarration() {
+        naturalNarrationTask?.cancel()
+        naturalNarrationTask = nil
+        activeNaturalNarrationID = nil
+        activeNaturalNarrationState = nil
+        naturalNarrationPlayer?.delegate = nil
+        naturalNarrationPlayer?.stop()
+        naturalNarrationPlayer = nil
+
+        speechWatchdogTask?.cancel()
+        speechWatchdogTask = nil
+        activeSpeechUtterance = nil
+        activeSpeechState = nil
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
     }
 
     private func startSpeechWatchdog(
@@ -971,7 +1102,9 @@ final class PlayerViewModel: NSObject, ObservableObject {
                   showPrompt,
                   drivingPromptState == completedState,
                   !speechSynthesizer.isSpeaking,
-                  activeSpeechUtterance == nil else { return }
+                  activeSpeechUtterance == nil,
+                  naturalNarrationPlayer?.isPlaying != true,
+                  naturalNarrationTask == nil else { return }
             continuePlayback()
         default:
             break
@@ -996,8 +1129,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private static func makeNarrationVoiceOptions() -> [NarrationVoiceOption] {
         let automatic = NarrationVoiceOption(
             id: NarrationVoiceOption.automaticID,
-            name: "Best Available",
-            detail: "Automatically uses the clearest installed voice"
+            name: "Natural AI Voice",
+            detail: "AI-generated studio narration through your connected provider, with an on-device fallback"
         )
         let installed = Array(rankedEnglishVoices(AVSpeechSynthesisVoice.speechVoices()).prefix(8))
         return [automatic] + installed.map { voice in
@@ -1097,6 +1230,39 @@ extension PlayerViewModel: AVSpeechSynthesizerDelegate {
             self.drivingStatusText = completedState == .speakingFeedback
                 ? "Feedback narration stopped. Review it below, then continue when you're ready."
                 : "Narration stopped. Tap the microphone to try again."
+        }
+    }
+}
+
+extension PlayerViewModel: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.naturalNarrationPlayer === player,
+                  let completedState = self.activeNaturalNarrationState else { return }
+            self.naturalNarrationPlayer?.delegate = nil
+            self.naturalNarrationPlayer = nil
+            self.activeNaturalNarrationID = nil
+            self.activeNaturalNarrationState = nil
+
+            guard flag else {
+                self.drivingPromptState = .idle
+                self.drivingStatusText = "Narration stopped. Review the text, then continue when you're ready."
+                return
+            }
+            await self.advanceAfterSpeech(from: completedState)
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor [weak self] in
+            guard let self, self.naturalNarrationPlayer === player else { return }
+            self.naturalNarrationPlayer?.delegate = nil
+            self.naturalNarrationPlayer = nil
+            self.activeNaturalNarrationID = nil
+            self.activeNaturalNarrationState = nil
+            self.drivingPromptState = .idle
+            self.drivingStatusText = "Natural voice playback stopped. Review the text, then continue when you're ready."
         }
     }
 }
