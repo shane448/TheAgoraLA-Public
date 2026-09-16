@@ -23,6 +23,7 @@ final class AudioPlayerManager: ObservableObject {
     private var interruptionObserver: NSObjectProtocol?
     private var wasPlayingBeforeInterruption = false
     private var loadGeneration = 0
+    private var playbackIsHeld = false
 
     private func configureAudioSession() {
         #if os(iOS)
@@ -72,6 +73,7 @@ final class AudioPlayerManager: ObservableObject {
             interruptionObserver = nil
         }
         wasPlayingBeforeInterruption = false
+        playbackIsHeld = false
 
         // Clear published state so UI resets
         isPlaying = false
@@ -131,12 +133,14 @@ final class AudioPlayerManager: ObservableObject {
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
             switch type {
             case .began:
-                self.wasPlayingBeforeInterruption = self.isPlaying
+                self.wasPlayingBeforeInterruption = self.isPlaying && !self.playbackIsHeld
                 self.pause()
             case .ended:
                 if let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt {
                     let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                    if options.contains(.shouldResume), self.wasPlayingBeforeInterruption {
+                    if options.contains(.shouldResume),
+                       self.wasPlayingBeforeInterruption,
+                       !self.playbackIsHeld {
                         self.play()
                     }
                 }
@@ -171,6 +175,7 @@ final class AudioPlayerManager: ObservableObject {
     }
 
     func play() {
+        guard !playbackIsHeld else { return }
         guard let player else { return }
         configureAudioSession()
         if duration.isFinite, duration > 0, currentTime >= duration - 0.5 {
@@ -184,6 +189,14 @@ final class AudioPlayerManager: ObservableObject {
     func pause() {
         player?.pause()
         isPlaying = false
+    }
+
+    func setPlaybackHeld(_ held: Bool) {
+        playbackIsHeld = held
+        if held {
+            wasPlayingBeforeInterruption = false
+            pause()
+        }
     }
 
     func seek(to seconds: Double) {

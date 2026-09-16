@@ -68,7 +68,6 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private var speechWatchdogTask: Task<Void, Never>?
     private var transcriptUpdateDate = Date()
     private var listeningStartDate = Date()
-    private var speechProgressDate = Date()
     private var emptyListeningRetryCount = 0
     private var activeSpeechUtterance: AVSpeechUtterance?
     private var activeSpeechState: DrivingPromptState?
@@ -202,6 +201,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         promptTriggerTimes.removeAll()
         if sourceChanged {
             cancelDrivingFlow()
+            audioManager.setPlaybackHeld(false)
             if updated.audioURL.isFileURL {
                 audioManager.pause()
             } else {
@@ -462,6 +462,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         cancelDrivingFlow()
         showPrompt = false
         activePrompt = nil
+        audioManager.setPlaybackHeld(false)
         audioManager.play()
     }
 
@@ -804,7 +805,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     }
 
     private func activatePrompt(_ prompt: Prompt, beginDriving: Bool) {
-        audioManager.pause()
+        audioManager.setPlaybackHeld(true)
         markPromptEncountered(prompt)
         activePrompt = prompt
         showPrompt = true
@@ -918,34 +919,35 @@ final class PlayerViewModel: NSObject, ObservableObject {
         utterance.postUtteranceDelay = 0.22
         activeSpeechUtterance = utterance
         activeSpeechState = drivingPromptState
-        speechProgressDate = Date()
         speechSynthesizer.speak(utterance)
-        startSpeechWatchdog(for: drivingPromptState, utterance: utterance, text: text)
+        startSpeechWatchdog(for: drivingPromptState, utterance: utterance)
     }
 
     private func startSpeechWatchdog(
         for expectedState: DrivingPromptState,
-        utterance: AVSpeechUtterance,
-        text: String
+        utterance: AVSpeechUtterance
     ) {
         speechWatchdogTask?.cancel()
-        let wordCount = max(text.split(whereSeparator: { $0.isWhitespace }).count, 1)
-        let timeout = min(max((Double(wordCount) / 2.2) + 5, 8), 90)
 
         speechWatchdogTask = Task { @MainActor in
-            let deadline = Date().addingTimeInterval(timeout)
+            let earliestRecovery = Date().addingTimeInterval(3)
+            var consecutiveStoppedChecks = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 guard !Task.isCancelled else { return }
                 guard drivingModeEnabled, showPrompt, drivingPromptState == expectedState else { return }
                 guard activeSpeechUtterance === utterance else { return }
 
-                let hasStalled = Date().timeIntervalSince(speechProgressDate) >= 5
-                if !speechSynthesizer.isSpeaking || hasStalled || Date() >= deadline {
+                if speechSynthesizer.isSpeaking {
+                    consecutiveStoppedChecks = 0
+                    continue
+                }
+                guard Date() >= earliestRecovery else { continue }
+
+                consecutiveStoppedChecks += 1
+                if consecutiveStoppedChecks >= 3 {
                     activeSpeechUtterance = nil
                     activeSpeechState = nil
-                    speechSynthesizer.stopSpeaking(at: .immediate)
-                    // The recovery task also starts listening; do not cancel it during the transition.
                     speechWatchdogTask = nil
                     await advanceAfterSpeech(from: expectedState)
                     return
@@ -963,6 +965,13 @@ final class PlayerViewModel: NSObject, ObservableObject {
         case .announcingPrompt, .retryingListening:
             await startListening()
         case .speakingFeedback:
+            // Let the spoken-audio route settle before releasing the podcast playback hold.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard drivingModeEnabled,
+                  showPrompt,
+                  drivingPromptState == completedState,
+                  !speechSynthesizer.isSpeaking,
+                  activeSpeechUtterance == nil else { return }
             continuePlayback()
         default:
             break
@@ -1064,16 +1073,6 @@ final class PlayerViewModel: NSObject, ObservableObject {
 }
 
 extension PlayerViewModel: AVSpeechSynthesizerDelegate {
-    nonisolated func speechSynthesizer(
-        _ synthesizer: AVSpeechSynthesizer,
-        willSpeakRangeOfSpeechString characterRange: NSRange,
-        utterance: AVSpeechUtterance
-    ) {
-        Task { @MainActor [weak self] in
-            self?.speechProgressDate = Date()
-        }
-    }
-
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1090,9 +1089,14 @@ extension PlayerViewModel: AVSpeechSynthesizerDelegate {
             guard let self else { return }
             guard self.activeSpeechUtterance === utterance,
                   let completedState = self.activeSpeechState else { return }
+            self.speechWatchdogTask?.cancel()
+            self.speechWatchdogTask = nil
             self.activeSpeechUtterance = nil
             self.activeSpeechState = nil
-            await self.advanceAfterSpeech(from: completedState)
+            self.drivingPromptState = .idle
+            self.drivingStatusText = completedState == .speakingFeedback
+                ? "Feedback narration stopped. Review it below, then continue when you're ready."
+                : "Narration stopped. Tap the microphone to try again."
         }
     }
 }
