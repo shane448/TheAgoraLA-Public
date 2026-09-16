@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import AVFoundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private struct PromptHistorySnapshot: Codable {
     let responses: [PromptResponse]
@@ -83,7 +86,14 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private var microphoneStartRetryCount = 0
     private var handsFreePausedForInterruption = false
     private var shouldResumeFeedbackAfterInterruption = false
+    private var pendingPlaybackRestore: (episodeID: UUID, position: Double)?
+    private var lastPersistedEpisodeID: UUID?
+    private var lastPersistedPosition = 0.0
+    private var lastPlaybackPositionWrite = Date.distantPast
+    private var isChangingEpisode = false
+    private var isApplyingPlaybackRestore = false
     private static let narrationVoiceKey = "TheAgoraLA.NarrationVoice"
+    private static let playbackPositionKeyPrefix = "TheAgoraLA.PlaybackPosition."
 
     override init() {
         let voiceOptions = Self.makeNarrationVoiceOptions()
@@ -101,21 +111,29 @@ final class PlayerViewModel: NSObject, ObservableObject {
         audioManager.$isPlaying
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
-                self?.isPlaying = value
+                guard let self else { return }
+                self.isPlaying = value
+                if !value {
+                    self.persistPlaybackPosition(force: true)
+                }
             }
             .store(in: &cancellables)
 
         audioManager.$currentTime
             .receive(on: RunLoop.main)
             .sink { [weak self] t in
-                self?.currentTime = t
+                guard let self else { return }
+                self.currentTime = t
+                self.persistPlaybackPosition()
             }
             .store(in: &cancellables)
 
         audioManager.$duration
             .receive(on: RunLoop.main)
             .sink { [weak self] d in
-                self?.duration = d
+                guard let self else { return }
+                self.duration = d
+                self.restorePlaybackPositionIfReady(duration: d)
             }
             .store(in: &cancellables)
 
@@ -159,6 +177,15 @@ final class PlayerViewModel: NSObject, ObservableObject {
                 self?.handleAudioSessionInterruption(notification)
             }
             .store(in: &cancellables)
+
+        #if canImport(UIKit)
+        NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.persistPlaybackPosition(force: true)
+            }
+            .store(in: &cancellables)
+        #endif
     }
 
     func bind(pointsStore: PointsStore) {
@@ -205,10 +232,15 @@ final class PlayerViewModel: NSObject, ObservableObject {
     func updateEpisode(_ updated: Episode) {
         let sourceChanged = episode.id != updated.id || episode.audioURL != updated.audioURL
         let playerNeedsReload = !updated.audioURL.isFileURL && audioManager.loadedURL != updated.audioURL
-        if sourceChanged { saveActiveDraft() }
+        if sourceChanged {
+            persistPlaybackPosition(force: true)
+            saveActiveDraft()
+        }
         episode = updated
         promptTriggerTimes.removeAll()
         if sourceChanged {
+            isChangingEpisode = true
+            preparePlaybackRestore(for: updated)
             cancelDrivingFlow()
             audioManager.setPlaybackHeld(false)
             if updated.audioURL.isFileURL {
@@ -216,6 +248,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
             } else {
                 audioManager.load(url: updated.audioURL)
             }
+            isChangingEpisode = false
             nowPlaying.configure(title: updated.title, duration: 0)
             PlayerDurationCache.shared.duration = 0
             loadPromptHistory(for: updated)
@@ -224,7 +257,11 @@ final class PlayerViewModel: NSObject, ObservableObject {
             hasScoredActivePrompt = false
         } else {
             if playerNeedsReload {
+                persistPlaybackPosition(force: true)
+                isChangingEpisode = true
+                preparePlaybackRestore(for: updated)
                 audioManager.load(url: updated.audioURL)
+                isChangingEpisode = false
                 PlayerDurationCache.shared.duration = 0
             }
             let validPromptIDs = Set(updated.prompts.map(\.id))
@@ -278,6 +315,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
         currentTime = target
         audioManager.seek(to: target)
+        persistPlaybackPosition(force: true)
     }
 
     func checkForPrompt(at time: Double) {
@@ -723,6 +761,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     }
 
     func appDidEnterBackground() {
+        persistPlaybackPosition(force: true)
         guard drivingModeEnabled, showPrompt else { return }
         guard drivingPromptState == .announcingPrompt
                 || drivingPromptState == .listening
@@ -740,6 +779,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     }
 
     func appDidBecomeActive() {
+        restorePlaybackPositionIfReady(duration: audioManager.duration)
         guard handsFreePausedForInterruption else { return }
         handsFreePausedForInterruption = false
         guard drivingModeEnabled, showPrompt, let activePrompt else { return }
@@ -895,6 +935,67 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     private func historyKey(for episodeID: UUID) -> String {
         "TheAgoraLA.PromptHistory.\(episodeID.uuidString)"
+    }
+
+    private func preparePlaybackRestore(for episode: Episode) {
+        guard !episode.audioURL.isFileURL else {
+            pendingPlaybackRestore = nil
+            return
+        }
+        let position = Self.savedPlaybackPosition(for: episode.id)
+        lastPersistedEpisodeID = episode.id
+        lastPersistedPosition = position
+        lastPlaybackPositionWrite = Date()
+        pendingPlaybackRestore = position > 0.5 ? (episode.id, position) : nil
+    }
+
+    private func restorePlaybackPositionIfReady(duration: Double) {
+        guard duration.isFinite, duration > 1,
+              let pending = pendingPlaybackRestore,
+              pending.episodeID == episode.id,
+              audioManager.loadedURL == episode.audioURL else { return }
+
+        let target = min(max(pending.position, 0), duration)
+        pendingPlaybackRestore = nil
+        isApplyingPlaybackRestore = true
+        audioManager.seek(to: target)
+        currentTime = target
+        nowPlaying.update(elapsed: target, isPlaying: false, duration: duration)
+        isApplyingPlaybackRestore = false
+    }
+
+    private func persistPlaybackPosition(force: Bool = false) {
+        guard !isChangingEpisode,
+              !isApplyingPlaybackRestore,
+              pendingPlaybackRestore == nil,
+              !episode.audioURL.isFileURL,
+              audioManager.loadedURL == episode.audioURL else { return }
+
+        let rawPosition = audioManager.currentTime
+        guard rawPosition.isFinite, rawPosition >= 0 else { return }
+        let position = audioManager.duration.isFinite && audioManager.duration > 0
+            ? min(rawPosition, audioManager.duration)
+            : rawPosition
+        let now = Date()
+        let episodeChanged = lastPersistedEpisodeID != episode.id
+        let movedBackward = !episodeChanged && position < lastPersistedPosition - 5
+        let movedEnough = episodeChanged || abs(position - lastPersistedPosition) >= 2
+        let enoughTimePassed = now.timeIntervalSince(lastPlaybackPositionWrite) >= 2
+        guard force || movedBackward || (movedEnough && enoughTimePassed) else { return }
+
+        UserDefaults.standard.set(position, forKey: Self.playbackPositionKey(for: episode.id))
+        lastPersistedEpisodeID = episode.id
+        lastPersistedPosition = position
+        lastPlaybackPositionWrite = now
+    }
+
+    private static func savedPlaybackPosition(for episodeID: UUID) -> Double {
+        let position = UserDefaults.standard.double(forKey: playbackPositionKey(for: episodeID))
+        return position.isFinite && position >= 0 ? position : 0
+    }
+
+    private static func playbackPositionKey(for episodeID: UUID) -> String {
+        playbackPositionKeyPrefix + episodeID.uuidString
     }
 
     private func speak(text: String) {

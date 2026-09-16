@@ -111,6 +111,15 @@ final class AudioPlayerManager: ObservableObject {
                 if item.status == .readyToPlay {
                     self.isBuffering = false
                     self.playbackError = nil
+                    let loadedDuration = item.duration.seconds
+                    if loadedDuration.isFinite, loadedDuration > 0 {
+                        self.duration = loadedDuration
+                        NotificationCenter.default.post(
+                            name: .audioDurationUpdated,
+                            object: nil,
+                            userInfo: ["duration": loadedDuration]
+                        )
+                    }
                 } else if item.status == .failed {
                     self.isBuffering = false
                     self.isPlaying = false
@@ -206,6 +215,7 @@ final class AudioPlayerManager: ObservableObject {
             ? min(nonnegativeSeconds, duration)
             : nonnegativeSeconds
         let time = CMTime(seconds: boundedSeconds, preferredTimescale: 600)
+        currentTime = boundedSeconds
         player?.seek(to: time)
     }
 
