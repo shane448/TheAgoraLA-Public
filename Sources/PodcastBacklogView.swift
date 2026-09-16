@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import UIKit
 
 private enum PodcastBacklogStatus: String, Codable {
     case waiting
@@ -131,6 +132,17 @@ private final class PodcastBacklogStore: ObservableObject {
     var hasActiveJobs: Bool { items.contains { $0.status.isActive } }
     var hasStartableItems: Bool { items.contains { $0.status == .waiting || $0.status == .failed } }
     var completedCount: Int { items.filter { $0.status == .complete }.count }
+    var activeCount: Int { items.filter { $0.status.isActive }.count }
+    var waitingCount: Int { items.filter { $0.status == .waiting }.count }
+    var failedCount: Int { items.filter { $0.status == .failed }.count }
+    var orderedItems: [PodcastBacklogItem] {
+        items.sorted { lhs, rhs in
+            let lhsRank = displayRank(for: lhs.status)
+            let rhsRank = displayRank(for: rhs.status)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
     var startButtonTitle: String {
         if cloudUnavailable { return "Prepare Remaining on This iPhone" }
         return hasActiveJobs ? "Add Remaining to Running Backlog" : "Analyze Backlog"
@@ -248,13 +260,13 @@ private final class PodcastBacklogStore: ObservableObject {
             let addedText = additions.isEmpty
                 ? ""
                 : " and added \(additions.count) new podcast\(additions.count == 1 ? "" : "s")"
-            notice = "Restored \(restoredCount) failed podcast\(restoredCount == 1 ? "" : "s")\(addedText). Tap \(startButtonTitle) to try again."
+            notice = "Restored \(restoredCount) failed podcast\(restoredCount == 1 ? "" : "s")\(addedText). Analysis will begin automatically."
         } else if !additions.isEmpty {
-            notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s") to the backlog."
+            notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s"). Starting analysis..."
         } else if runningCount > 0 {
             notice = "That podcast is already being analyzed in your backlog."
         } else if waitingCount > 0 {
-            notice = "That podcast is already ready. Tap \(startButtonTitle) to begin."
+            notice = "That podcast is already waiting to be analyzed."
         } else if completeCount > 0 {
             notice = "That podcast is already prepared and ready to listen to below."
         } else {
@@ -296,6 +308,12 @@ private final class PodcastBacklogStore: ObservableObject {
             guard !ids.isEmpty else { break }
             attemptedIDs.formUnion(ids)
 
+            if cloudUnavailable {
+                isUsingDirectFallback = true
+                await prepareDirectly(ids: ids, episodeStore: episodeStore)
+                isUsingDirectFallback = false
+                continue
+            }
             notice = "Checking the background analysis service..."
             do {
                 try await CloudAnalysisClient().verifyAvailability()
@@ -623,6 +641,16 @@ private final class PodcastBacklogStore: ObservableObject {
     private func normalizedURL(_ url: URL) -> String {
         PodcastSourceParser.identity(for: url)
     }
+
+    private func displayRank(for status: PodcastBacklogStatus) -> Int {
+        switch status {
+        case .complete: return 0
+        case .processing, .submitting, .resolving: return 1
+        case .queued: return 2
+        case .waiting: return 3
+        case .failed: return 4
+        }
+    }
 }
 
 private struct PodcastLinkDraft: Identifiable {
@@ -652,7 +680,7 @@ struct PodcastBacklogView: View {
                     if backlog.items.isEmpty {
                         emptyCard
                     } else {
-                        ForEach(backlog.items) { item in
+                        ForEach(backlog.orderedItems) { item in
                             PodcastBacklogRow(
                                 item: item,
                                 isSelected: episodeStore.episode.id == item.episodeID,
@@ -808,24 +836,47 @@ struct PodcastBacklogView: View {
                     )
                 }
 
-                if linkDrafts.count < 10 {
-                    Button {
-                        addDraft()
-                    } label: {
-                        Label("Add Another Podcast", systemImage: "plus.circle.fill")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        addAnotherButton
+                        pasteCopiedButton
                     }
-                    .buttonStyle(AgoraOutlineButtonStyle())
+                    VStack(alignment: .leading, spacing: 10) {
+                        addAnotherButton
+                        pasteCopiedButton
+                    }
                 }
 
-                Button("Add to Backlog") {
-                    submitDrafts()
+                Button("Add & Analyze") {
+                    submitDraftsAndStart()
                 }
-                .buttonStyle(AgoraOutlineButtonStyle())
+                .buttonStyle(AgoraPillButtonStyle())
                 .disabled(linkDrafts.allSatisfy {
                     $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 })
             }
         }
+    }
+
+    @ViewBuilder
+    private var addAnotherButton: some View {
+        if linkDrafts.count < 10 {
+            Button {
+                addDraft()
+            } label: {
+                Label("Add Another", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(AgoraOutlineButtonStyle())
+        }
+    }
+
+    private var pasteCopiedButton: some View {
+        Button {
+            pasteCopiedLinks()
+        } label: {
+            Label("Paste Copied", systemImage: "doc.on.clipboard")
+        }
+        .buttonStyle(AgoraOutlineButtonStyle())
     }
 
     private func addDraft() {
@@ -854,14 +905,44 @@ struct PodcastBacklogView: View {
         linkDrafts[index].text = ""
     }
 
-    private func submitDrafts() {
+    private func submitDraftsAndStart() {
         let entries = linkDrafts.map(\.text)
         focusedLinkID = nil
         guard backlog.addLinks(from: entries) else { return }
 
-        DispatchQueue.main.async {
-            linkDrafts = [PodcastLinkDraft()]
+        linkDrafts = [PodcastLinkDraft()]
+        Task {
+            await backlog.startAll(episodeStore: episodeStore)
         }
+    }
+
+    private func pasteCopiedLinks() {
+        guard let copiedText = UIPasteboard.general.string else {
+            backlog.notice = "Copy a podcast link first, then tap Paste Copied."
+            return
+        }
+        let urls = PodcastSourceParser.urls(in: copiedText)
+        guard !urls.isEmpty else {
+            backlog.notice = "The clipboard does not contain a supported podcast link."
+            return
+        }
+
+        let existing = Set(linkDrafts.flatMap { PodcastSourceParser.urls(in: $0.text) }.map(\.absoluteString))
+        let additions = urls.filter { !existing.contains($0.absoluteString) }
+        guard !additions.isEmpty else {
+            backlog.notice = "Those copied links are already in the boxes above."
+            return
+        }
+        let availableSlots = max(10 - linkDrafts.filter { !$0.text.isEmpty }.count, 0)
+        let accepted = additions.prefix(availableSlots)
+        var filled = linkDrafts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        filled.append(contentsOf: accepted.map { url in
+            var draft = PodcastLinkDraft()
+            draft.text = url.absoluteString
+            return draft
+        })
+        linkDrafts = filled.isEmpty ? [PodcastLinkDraft()] : filled
+        backlog.notice = "Pasted \(accepted.count) podcast link\(accepted.count == 1 ? "" : "s"). Tap Add & Analyze when ready."
     }
 
     private func removeDraft(id: UUID) {
@@ -877,7 +958,7 @@ struct PodcastBacklogView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("\(backlog.completedCount) ready · \(backlog.items.count) total")
+                        Text("\(backlog.completedCount) ready · \(backlog.activeCount) working · \(backlog.waitingCount) waiting")
                             .font(AgoraTheme.cardTitleFont)
                             .foregroundColor(AgoraTheme.ink)
                         Text(backlog.notice.isEmpty ? "The strongest final AI review is used for every episode." : backlog.notice)
@@ -902,6 +983,12 @@ struct PodcastBacklogView: View {
                 }
                 .buttonStyle(AgoraPillButtonStyle())
                 .disabled(!backlog.hasStartableItems)
+
+                if backlog.failedCount > 0 {
+                    Text("\(backlog.failedCount) podcast\(backlog.failedCount == 1 ? " needs" : "s need") attention. Retry from its card without restarting completed work.")
+                        .font(AgoraTheme.tagFont)
+                        .foregroundColor(AgoraTheme.inkMuted)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
