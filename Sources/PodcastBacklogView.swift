@@ -60,6 +60,7 @@ private final class PodcastBacklogStore: ObservableObject {
     @Published private(set) var isSubmitting = false
     @Published private(set) var isRefreshing = false
     @Published private(set) var isUsingDirectFallback = false
+    @Published private(set) var cloudUnavailable = false
     @Published var notice = ""
 
     private static var storageURL: URL? {
@@ -95,6 +96,21 @@ private final class PodcastBacklogStore: ObservableObject {
     var hasActiveJobs: Bool { items.contains { $0.status.isActive } }
     var hasStartableItems: Bool { items.contains { $0.status == .waiting || $0.status == .failed } }
     var completedCount: Int { items.filter { $0.status == .complete }.count }
+    var startButtonTitle: String {
+        if cloudUnavailable { return "Prepare Remaining on This iPhone" }
+        return hasActiveJobs ? "Add Remaining to Running Backlog" : "Analyze Backlog"
+    }
+
+    func checkCloudAvailability() async {
+        guard CloudAnalysisClient.isConfigured else { return }
+        do {
+            try await CloudAnalysisClient().verifyAvailability()
+            cloudUnavailable = false
+        } catch {
+            cloudUnavailable = true
+            notice = "Cloud preparation is offline. Your backlog is saved; you can prepare new podcasts on this iPhone while Agora stays open."
+        }
+    }
 
     func auditCompletedEpisodes(episodeStore: EpisodeStore) {
         var rebuildCount = 0
@@ -172,8 +188,7 @@ private final class PodcastBacklogStore: ObservableObject {
             }
         }
 
-        let availableSlots = max(0, 10 - items.filter { $0.status != .complete }.count)
-        let additions = newURLs.prefix(availableSlots).map { url in
+        let additions = newURLs.map { url in
             PodcastBacklogItem(
                 id: UUID(),
                 episodeID: UUID(),
@@ -194,20 +209,17 @@ private final class PodcastBacklogStore: ObservableObject {
         }
         items.append(contentsOf: additions)
         persist()
-        if additions.count < newURLs.count {
-            notice = "Added \(additions.count). Finish or remove queued items before adding more than 10 active episodes."
-            return false
-        } else if restoredCount > 0 {
+        if restoredCount > 0 {
             let addedText = additions.isEmpty
                 ? ""
                 : " and added \(additions.count) new podcast\(additions.count == 1 ? "" : "s")"
-            notice = "Restored \(restoredCount) failed podcast\(restoredCount == 1 ? "" : "s")\(addedText). Tap Analyze Backlog to try again."
+            notice = "Restored \(restoredCount) failed podcast\(restoredCount == 1 ? "" : "s")\(addedText). Tap \(startButtonTitle) to try again."
         } else if !additions.isEmpty {
             notice = "Added \(additions.count) podcast\(additions.count == 1 ? "" : "s") to the backlog."
         } else if runningCount > 0 {
             notice = "That podcast is already being analyzed in your backlog."
         } else if waitingCount > 0 {
-            notice = "That podcast is already ready. Tap Analyze Backlog to begin."
+            notice = "That podcast is already ready. Tap \(startButtonTitle) to begin."
         } else if completeCount > 0 {
             notice = "That podcast is already prepared and ready to listen to below."
         } else {
@@ -217,7 +229,10 @@ private final class PodcastBacklogStore: ObservableObject {
     }
 
     func startAll(episodeStore: EpisodeStore) async {
-        guard !isSubmitting else { return }
+        if isSubmitting {
+            notice = "New podcasts will join as soon as the current submissions finish."
+            return
+        }
         guard CloudAnalysisClient.isConfigured else {
             notice = "Background analysis needs the Agora cloud service configured in this build."
             return
@@ -226,35 +241,51 @@ private final class PodcastBacklogStore: ObservableObject {
             notice = "Connect your AI account before starting the backlog."
             return
         }
-        let ids = items.filter { $0.status == .waiting || $0.status == .failed }.map(\.id)
-        guard !ids.isEmpty else {
+        guard hasStartableItems else {
             notice = hasActiveJobs ? "Your backlog is already running in the cloud." : "Add podcast links to begin."
             return
         }
 
         isSubmitting = true
-        defer { isSubmitting = false }
-
-        notice = "Checking the background analysis service..."
-        do {
-            try await CloudAnalysisClient().verifyAvailability()
-        } catch {
-            isUsingDirectFallback = true
-            await prepareDirectly(ids: ids, episodeStore: episodeStore)
-            return
+        defer {
+            isSubmitting = false
+            isUsingDirectFallback = false
         }
-        isUsingDirectFallback = false
 
-        notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
+        var attemptedIDs = Set<UUID>()
+        var submittedToCloud = false
+        while !Task.isCancelled {
+            let ids = items.filter {
+                ($0.status == .waiting || $0.status == .failed) && !attemptedIDs.contains($0.id)
+            }.map(\.id)
+            guard !ids.isEmpty else { break }
+            attemptedIDs.formUnion(ids)
 
-        for start in stride(from: 0, to: ids.count, by: 3) {
-            let end = min(start + 3, ids.count)
-            let tasks = ids[start..<end].map { id in
-                Task { await self.submit(id: id, providerKey: providerKey) }
+            notice = "Checking the background analysis service..."
+            do {
+                try await CloudAnalysisClient().verifyAvailability()
+            } catch {
+                cloudUnavailable = true
+                isUsingDirectFallback = true
+                await prepareDirectly(ids: ids, episodeStore: episodeStore)
+                isUsingDirectFallback = false
+                continue
             }
-            for task in tasks { await task.value }
+            cloudUnavailable = false
+            isUsingDirectFallback = false
+
+            notice = "Preparing and submitting \(ids.count) podcast\(ids.count == 1 ? "" : "s")..."
+            for start in stride(from: 0, to: ids.count, by: 3) {
+                let end = min(start + 3, ids.count)
+                let tasks = ids[start..<end].map { id in
+                    Task { await self.submit(id: id, providerKey: providerKey) }
+                }
+                for task in tasks { await task.value }
+            }
+            submittedToCloud = true
+            await refreshAll(episodeStore: episodeStore)
         }
-        await refreshAll(episodeStore: episodeStore)
+        guard submittedToCloud, !cloudUnavailable else { return }
         let failures = items.filter { $0.status == .failed }.count
         notice = failures == 0
             ? "Backlog submitted. You can leave the app while the cloud finishes."
@@ -274,11 +305,18 @@ private final class PodcastBacklogStore: ObservableObject {
                 let snapshot = try await CloudAnalysisClient().status(
                     for: PendingCloudAnalysis(jobID: jobID, expectedAudioURL: audioURL)
                 )
+                cloudUnavailable = false
                 switch snapshot.state {
                 case .queued:
-                    update(id) { $0.status = .queued }
+                    update(id) {
+                        $0.status = .queued
+                        $0.errorMessage = nil
+                    }
                 case .processing:
-                    update(id) { $0.status = .processing }
+                    update(id) {
+                        $0.status = .processing
+                        $0.errorMessage = nil
+                    }
                 case .failed:
                     update(id) {
                         $0.status = .failed
@@ -315,12 +353,19 @@ private final class PodcastBacklogStore: ObservableObject {
                 }
                 let message = error.localizedDescription
                 if message == CloudAnalysisError.backgroundServiceUnavailable {
+                    cloudUnavailable = true
+                    update(id) {
+                        $0.errorMessage = "The cloud service is offline. This job is saved and will refresh when it returns."
+                    }
+                    notice = "Cloud preparation is offline. Existing jobs are saved; new podcasts can be prepared on this iPhone while Agora stays open."
+                    break
+                }
+                if message == "Analysis job not found." {
                     update(id) {
                         $0.status = .failed
                         $0.jobID = nil
-                        $0.errorMessage = message
+                        $0.errorMessage = "This cloud job is no longer available. Tap Retry to prepare it again."
                     }
-                    notice = message
                     continue
                 }
                 update(id) {
@@ -576,9 +621,13 @@ struct PodcastBacklogView: View {
         .task {
             await episodeStore.loadLibraryIfNeeded()
             backlog.auditCompletedEpisodes(episodeStore: episodeStore)
+            await backlog.checkCloudAvailability()
             while !Task.isCancelled {
                 await backlog.refreshAll(episodeStore: episodeStore)
-                try? await Task.sleep(nanoseconds: backlog.hasActiveJobs ? 8_000_000_000 : 15_000_000_000)
+                let delay: UInt64 = backlog.cloudUnavailable
+                    ? 60_000_000_000
+                    : (backlog.hasActiveJobs ? 8_000_000_000 : 15_000_000_000)
+                try? await Task.sleep(nanoseconds: delay)
             }
         }
         .sheet(isPresented: $showAIAccount) {
@@ -610,13 +659,15 @@ struct PodcastBacklogView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(AgoraTheme.accent)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(backlog.isUsingDirectFallback ? "Direct preparation is running" : "Cloud preparation continues")
+                    Text(backlog.isUsingDirectFallback ? "Preparing on this iPhone" : backlog.cloudUnavailable ? "Cloud backlog is offline" : "Cloud preparation continues")
                         .font(AgoraTheme.cardTitleFont)
                         .foregroundColor(AgoraTheme.ink)
                     Text(
                         backlog.isUsingDirectFallback
                             ? "Keep Agora open while each episode is prepared through your connected AI. Completed podcasts are saved immediately."
-                            : "Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode."
+                            : backlog.cloudUnavailable
+                                ? "Your links and existing cloud jobs are saved. New episodes can be prepared here while Agora stays open; cloud jobs will refresh when the service returns."
+                                : "Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode."
                     )
                         .font(AgoraTheme.bodyFont)
                         .foregroundColor(AgoraTheme.inkMuted)
@@ -777,7 +828,7 @@ struct PodcastBacklogView: View {
                         .buttonStyle(AgoraOutlineButtonStyle())
                 }
 
-                Button(backlog.hasActiveJobs ? "Add Remaining to Running Backlog" : "Analyze Backlog") {
+                Button(backlog.startButtonTitle) {
                     if aiAccount.isConnected {
                         Task { await backlog.startAll(episodeStore: episodeStore) }
                     } else {
@@ -785,7 +836,7 @@ struct PodcastBacklogView: View {
                     }
                 }
                 .buttonStyle(AgoraPillButtonStyle())
-                .disabled(backlog.isSubmitting || !backlog.hasStartableItems)
+                .disabled(!backlog.hasStartableItems)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
