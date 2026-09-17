@@ -428,18 +428,11 @@ struct PlaybackSettingsView: View {
     private var handsFreeSettings: some View {
         AgoraCard {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle(
-                    "Complete Hands-Free",
-                    isOn: Binding(
-                        get: { viewModel.drivingModeEnabled },
-                        set: { viewModel.setHandsFreeMode($0) }
-                    )
-                )
-                .font(AgoraTheme.cardTitleFont)
-                .foregroundColor(AgoraTheme.ink)
-                .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+                Text("Complete Hands-Free")
+                    .font(AgoraTheme.cardTitleFont)
+                    .foregroundColor(AgoraTheme.ink)
 
-                Text("Prompts are read aloud. Speak your answer, then hear your score and corrections automatically.")
+                Text("Prompts are read aloud. Speak your answer, then hear your score and corrections automatically. Turn this on from the player screen.")
                     .font(AgoraTheme.tagFont)
                     .foregroundColor(AgoraTheme.inkMuted)
 
