@@ -109,6 +109,9 @@ private final class PodcastBacklogStore: ObservableObject {
         return directory.appendingPathComponent("podcast-backlog.json")
     }
 
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
     init() {
         if let url = Self.storageURL,
            let data = try? Data(contentsOf: url),
@@ -127,6 +130,39 @@ private final class PodcastBacklogStore: ObservableObject {
         } else {
             items = []
         }
+        observeAppLifecycle()
+    }
+
+    deinit {
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    /// Keeps the process alive briefly after the app is backgrounded so an in-flight
+    /// cloud poll or on-device analysis chain can keep running instead of freezing
+    /// mid-request. This only postpones suspension; it cannot survive a force-quit.
+    private func observeAppLifecycle() {
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.beginBackgroundExecutionIfNeeded() }
+            },
+            center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.endBackgroundExecution() }
+            },
+        ]
+    }
+
+    private func beginBackgroundExecutionIfNeeded() {
+        guard backgroundTaskID == .invalid, hasActiveJobs || isSubmitting else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "Agora Podcast Backlog") { [weak self] in
+            Task { @MainActor in self?.endBackgroundExecution() }
+        }
+    }
+
+    private func endBackgroundExecution() {
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
     }
 
     var hasActiveJobs: Bool { items.contains { $0.status.isActive } }
@@ -155,7 +191,7 @@ private final class PodcastBacklogStore: ObservableObject {
             cloudUnavailable = false
         } catch {
             cloudUnavailable = true
-            notice = "Cloud preparation is offline. Your backlog is saved; you can prepare new podcasts on this iPhone while Agora stays open."
+            notice = "Cloud preparation is offline. Your backlog is saved; you can prepare new podcasts on this iPhone. Preparation keeps running if you lock your phone or switch apps — just don't force-quit Agora."
         }
     }
 
@@ -411,7 +447,7 @@ private final class PodcastBacklogStore: ObservableObject {
                     update(id) {
                         $0.errorMessage = "The cloud service is offline. This job is saved and will refresh when it returns."
                     }
-                    notice = "Cloud preparation is offline. Existing jobs are saved; new podcasts can be prepared on this iPhone while Agora stays open."
+                    notice = "Cloud preparation is offline. Existing jobs are saved; new podcasts can be prepared on this iPhone. Preparation keeps running if you lock your phone or switch apps — just don't force-quit Agora."
                     break
                 }
                 if message == "Analysis job not found." {
@@ -513,7 +549,7 @@ private final class PodcastBacklogStore: ObservableObject {
     private func prepareDirectly(ids: [UUID], episodeStore: EpisodeStore) async {
         await episodeStore.loadLibraryIfNeeded()
         for (offset, id) in ids.enumerated() {
-            notice = "Cloud background processing is unavailable. Preparing podcast \(offset + 1) of \(ids.count) through your connected AI; keep Agora open."
+            notice = "Cloud background processing is unavailable. Preparing podcast \(offset + 1) of \(ids.count) through your connected AI. You can lock your phone or switch apps; just don't force-quit Agora until it's done."
             await prepareDirectly(id: id, episodeStore: episodeStore)
         }
 
@@ -649,6 +685,9 @@ private final class PodcastBacklogStore: ObservableObject {
         change(&updated)
         items[index] = updated
         persist()
+        if !hasActiveJobs, !isSubmitting {
+            endBackgroundExecution()
+        }
     }
 
     private func persist() {
@@ -779,9 +818,9 @@ struct PodcastBacklogView: View {
                         .foregroundColor(AgoraTheme.ink)
                     Text(
                         backlog.isUsingDirectFallback
-                            ? "Keep Agora open while each episode is prepared through your connected AI. Completed podcasts are saved immediately."
+                            ? "Each episode is prepared through your connected AI. You can lock your phone or switch to another app and it will keep going — just don't force-quit Agora until it's done. Completed podcasts are saved immediately."
                             : backlog.cloudUnavailable
-                                ? "Your links and existing cloud jobs are saved. New episodes can be prepared here while Agora stays open; cloud jobs will refresh when the service returns."
+                                ? "Your links and existing cloud jobs are saved. New episodes can be prepared here even if you lock your phone or switch apps, as long as you don't force-quit Agora; cloud jobs will refresh when the service returns."
                                 : "Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode."
                     )
                         .font(AgoraTheme.bodyFont)
