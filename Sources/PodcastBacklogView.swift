@@ -437,6 +437,24 @@ private final class PodcastBacklogStore: ObservableObject {
         }
     }
 
+    func reanalyze(_ id: UUID) {
+        guard let episodeID = item(with: id)?.episodeID else { return }
+        update(id) {
+            $0.title = nil
+            $0.audioURL = nil
+            $0.feedURL = nil
+            $0.episodeGUID = nil
+            $0.publisherSummary = nil
+            $0.transcriptURL = nil
+            $0.transcriptType = nil
+            $0.durationSeconds = nil
+            $0.jobID = nil
+            $0.status = .waiting
+            $0.errorMessage = "Refreshing the exact episode from its original link..."
+        }
+        Task { await PodcastTranscriptCheckpoint.remove(for: episodeID) }
+    }
+
     func remove(_ id: UUID) {
         let episodeID = item(with: id)?.episodeID
         items.removeAll { $0.id == id }
@@ -692,6 +710,10 @@ struct PodcastBacklogView: View {
                                 },
                                 onRetry: {
                                     backlog.retry(item.id)
+                                    Task { await backlog.startAll(episodeStore: episodeStore) }
+                                },
+                                onReanalyze: {
+                                    backlog.reanalyze(item.id)
                                     Task { await backlog.startAll(episodeStore: episodeStore) }
                                 },
                                 onRemove: {
@@ -1018,6 +1040,7 @@ private struct PodcastBacklogRow: View {
     let isSelected: Bool
     let onUse: () -> Void
     let onRetry: () -> Void
+    let onReanalyze: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
@@ -1072,7 +1095,7 @@ private struct PodcastBacklogRow: View {
 
                 if item.status == .complete {
                     HStack {
-                        Button("Reanalyze", action: onRetry)
+                        Button("Reanalyze", action: onReanalyze)
                             .buttonStyle(AgoraOutlineButtonStyle())
                         Spacer()
                     }

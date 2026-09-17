@@ -224,7 +224,7 @@ struct PodcastImportService {
             .value
 
         async let feedURL = appleFeedURL(showID: showID)
-        async let episodeMetadata = appleEpisodeMetadata(episodeID: episodeID)
+        async let episodeMetadata = appleEpisodeMetadata(episodeID: episodeID, showID: showID)
         let (resolvedFeedURL, metadata) = try await (feedURL, episodeMetadata)
         return try await importFeed(resolvedFeedURL, matching: metadata)
     }
@@ -243,8 +243,15 @@ struct PodcastImportService {
         }
         guard !items.isEmpty else { throw PodcastImportError.unsupportedLink }
 
-        let item = match(items: items, metadata: metadata)
-            ?? items.first(where: { $0.audioURL != nil })
+        let item: RSSImportItem?
+        if let metadata {
+            guard let exactEpisode = match(items: items, metadata: metadata) else {
+                throw PodcastImportError.episodeNotFound
+            }
+            item = exactEpisode
+        } else {
+            item = items.first(where: { $0.audioURL != nil })
+        }
         guard let item, let audioURL = item.audioURL else {
             throw PodcastImportError.episodeNotFound
         }
@@ -496,21 +503,36 @@ struct PodcastImportService {
         return feedURL
     }
 
-    private func appleEpisodeMetadata(episodeID: String?) async throws -> AppleEpisodeMetadata? {
-        guard let episodeID, Int(episodeID) != nil,
-              let url = URL(string: "https://itunes.apple.com/lookup?id=\(episodeID)&entity=podcastEpisode") else {
+    private func appleEpisodeMetadata(episodeID: String?, showID: String) async throws -> AppleEpisodeMetadata? {
+        guard let episodeID, Int64(episodeID) != nil else {
             return nil
         }
-        let data = try await downloadData(
-            from: url,
-            maximumBytes: 2_000_000,
+
+        if let directURL = URL(string: "https://itunes.apple.com/lookup?id=\(episodeID)&entity=podcastEpisode") {
+            let data = try await downloadData(
+                from: directURL,
+                maximumBytes: 2_000_000,
+                acceptedTypes: ["application/json", "text/json", "text/plain"]
+            ).data
+            let lookup = try JSONDecoder().decode(AppleLookupResponse.self, from: data)
+            if let match = lookup.results.first(where: { $0.trackId.map(String.init) == episodeID }) {
+                return AppleEpisodeMetadata(guid: match.episodeGuid, title: match.trackName)
+            }
+        }
+
+        guard let showURL = URL(
+            string: "https://itunes.apple.com/lookup?id=\(showID)&entity=podcastEpisode&limit=200"
+        ) else { throw PodcastImportError.invalidURL }
+        let showData = try await downloadData(
+            from: showURL,
+            maximumBytes: 15_000_000,
             acceptedTypes: ["application/json", "text/json", "text/plain"]
         ).data
-        let lookup = try JSONDecoder().decode(AppleLookupResponse.self, from: data)
-        guard let match = lookup.results.first(where: { $0.wrapperType == "podcastEpisode" || $0.episodeGuid != nil }) else {
-            return nil
+        let showLookup = try JSONDecoder().decode(AppleLookupResponse.self, from: showData)
+        guard let exactMatch = showLookup.results.first(where: { $0.trackId.map(String.init) == episodeID }) else {
+            throw PodcastImportError.episodeNotFound
         }
-        return AppleEpisodeMetadata(guid: match.episodeGuid, title: match.trackName)
+        return AppleEpisodeMetadata(guid: exactMatch.episodeGuid, title: exactMatch.trackName)
     }
 
     private func match(items: [RSSImportItem], metadata: AppleEpisodeMetadata?) -> RSSImportItem? {
@@ -718,6 +740,7 @@ private struct AppleLookupResponse: Decodable {
 }
 
 private struct AppleLookupItem: Decodable {
+    let trackId: Int64?
     let wrapperType: String?
     let feedUrl: String?
     let trackName: String?
