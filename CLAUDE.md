@@ -11,6 +11,29 @@
 
 The old standalone podcast prototype and third-party sample recording are intentionally excluded from this public repository. They are not dependencies of the current app.
 
+## Canonical Workspace And Publishing
+
+Always work from this repository folder:
+
+    /Users/shanereid/Documents/Codex/TheAgoraLA-release
+
+This is the Xcode project the team uses. Do not create or edit a second copy of
+the app elsewhere.
+
+The shared GitHub destination is the `claude` remote's `main` branch:
+
+    https://github.com/shane448/TheAgoraLA-Public.git
+
+After a requested change is implemented and the relevant checks pass, commit
+only the task's files and publish the result with:
+
+    git push claude HEAD:main
+
+Do this as the normal completion step unless the user explicitly asks not to
+publish. Do not push Xcode user settings, breakpoints, build products, secrets,
+or unrelated uncommitted work. The `origin` remote is only a local backup clone,
+not the shared release destination.
+
 ## Product Behavior
 
 `Import, Analyze & Save` is the single episode workflow. It resolves a supported podcast URL, obtains or creates the transcript, prepares the summary, selects high-quality transcript-grounded questions, generates expected answers from podcast evidence, schedules prompts after the relevant passages, and saves the complete episode.
