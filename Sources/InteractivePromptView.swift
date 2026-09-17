@@ -181,7 +181,7 @@ struct InteractivePromptView: View {
                             expansionThreshold: 320
                         )
 
-                        if viewModel.feedbackDetailLevel == .full {
+                        if viewModel.feedbackDetailLevel != .quick {
                             Divider()
 
                             Text("Podcast-supported answer")
@@ -193,7 +193,9 @@ struct InteractivePromptView: View {
                                 expansionThreshold: 240,
                                 color: AgoraTheme.ink
                             )
-                        } else if !viewModel.drivingModeEnabled {
+                        }
+
+                        if viewModel.feedbackDetailLevel != .full, !viewModel.drivingModeEnabled {
                             Text("Resuming the podcast...")
                                 .font(AgoraTheme.tagFont)
                                 .foregroundColor(AgoraTheme.inkMuted)

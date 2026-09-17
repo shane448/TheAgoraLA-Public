@@ -395,13 +395,9 @@ struct PlaybackSettingsView: View {
                 .font(AgoraTheme.cardTitleFont)
                 .foregroundColor(AgoraTheme.ink)
 
-            Text(
-                viewModel.feedbackDetailLevel == .quick
-                    ? "Quick: hear your grade and what you missed, then the podcast resumes automatically."
-                    : "Full: see your grade, feedback, and the podcast's answer before continuing."
-            )
-            .font(AgoraTheme.tagFont)
-            .foregroundColor(AgoraTheme.inkMuted)
+            Text(feedbackDetailDescription)
+                .font(AgoraTheme.tagFont)
+                .foregroundColor(AgoraTheme.inkMuted)
 
             Slider(
                 value: Binding(
@@ -410,15 +406,17 @@ struct PlaybackSettingsView: View {
                         viewModel.feedbackDetailLevel = FeedbackDetailLevel(rawValue: Int(newValue.rounded())) ?? .full
                     }
                 ),
-                in: 0...1,
+                in: 0...2,
                 step: 1
             )
             .tint(AgoraTheme.accent)
             .accessibilityLabel("Feedback detail")
-            .accessibilityValue(viewModel.feedbackDetailLevel == .quick ? "Little" : "A lot")
+            .accessibilityValue(feedbackDetailAccessibilityValue)
 
             HStack {
                 Text("Little")
+                Spacer()
+                Text("Balanced")
                 Spacer()
                 Text("A Lot")
             }
@@ -551,6 +549,25 @@ struct PlaybackSettingsView: View {
     private var selectedNarrationVoice: NarrationVoiceOption? {
         viewModel.narrationVoiceOptions.first {
             $0.id == viewModel.selectedNarrationVoiceID
+        }
+    }
+
+    private var feedbackDetailDescription: String {
+        switch viewModel.feedbackDetailLevel {
+        case .quick:
+            return "Quick: hear your grade and what you missed, then the podcast resumes automatically."
+        case .balanced:
+            return "Balanced: see your grade, feedback, and the podcast's answer, then it resumes automatically."
+        case .full:
+            return "Full: see your grade, feedback, and the podcast's answer, and continue whenever you're ready."
+        }
+    }
+
+    private var feedbackDetailAccessibilityValue: String {
+        switch viewModel.feedbackDetailLevel {
+        case .quick: return "Little"
+        case .balanced: return "Balanced"
+        case .full: return "A lot"
         }
     }
 }

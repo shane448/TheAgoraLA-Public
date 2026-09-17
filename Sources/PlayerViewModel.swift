@@ -25,7 +25,8 @@ struct NarrationVoiceOption: Identifiable, Hashable {
 
 enum FeedbackDetailLevel: Int, CaseIterable {
     case quick = 0
-    case full = 1
+    case balanced = 1
+    case full = 2
 }
 
 @MainActor
@@ -104,7 +105,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private var isApplyingPlaybackRestore = false
     private var autoContinueTask: Task<Void, Never>?
     private static let narrationVoiceKey = "TheAgoraLA.NarrationVoice"
-    private static let feedbackDetailLevelKey = "TheAgoraLA.FeedbackDetailLevel"
+    // ".v2" avoids reinterpreting an old saved rawValue under the 3-case scheme (old 1 meant full, new 1 means balanced).
+    private static let feedbackDetailLevelKey = "TheAgoraLA.FeedbackDetailLevel.v2"
     private static let playbackPositionKeyPrefix = "TheAgoraLA.PlaybackPosition."
 
     override init() {
@@ -521,15 +523,15 @@ final class PlayerViewModel: NSObject, ObservableObject {
             drivingPromptState = .speakingFeedback
             drivingStatusText = "Reading feedback..."
             speak(text: spokenFeedback(for: result))
-        } else if feedbackDetailLevel == .quick {
-            scheduleAutoContinue(for: prompt.id)
+        } else if feedbackDetailLevel != .full {
+            scheduleAutoContinue(for: prompt.id, afterSeconds: feedbackDetailLevel == .quick ? 1.6 : 4.5)
         }
     }
 
-    private func scheduleAutoContinue(for promptID: UUID) {
+    private func scheduleAutoContinue(for promptID: UUID, afterSeconds: Double) {
         autoContinueTask?.cancel()
         autoContinueTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(afterSeconds * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }
             guard self.activePrompt?.id == promptID, self.hasScoredActivePrompt, self.showPrompt else { return }
             self.continuePlayback()
@@ -1248,7 +1250,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     private func spokenFeedback(for result: AIResult) -> String {
         let scoreDescription = "You scored \(result.score) out of 100."
-        guard feedbackDetailLevel == .full else { return scoreDescription }
+        guard feedbackDetailLevel != .quick else { return scoreDescription }
         return "\(scoreDescription) \(result.feedback)"
     }
 
