@@ -40,6 +40,7 @@ private struct PodcastBacklogItem: Identifiable, Codable {
     var transcriptURL: URL?
     var transcriptType: String?
     var durationSeconds: Double?
+    var artworkURL: URL?
     var jobID: UUID?
     var status: PodcastBacklogStatus
     var errorMessage: String?
@@ -284,6 +285,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 transcriptURL: nil,
                 transcriptType: nil,
                 durationSeconds: nil,
+                artworkURL: nil,
                 jobID: nil,
                 status: .waiting,
                 errorMessage: nil,
@@ -426,7 +428,8 @@ private final class PodcastBacklogStore: ObservableObject {
                         episodeGUID: item.episodeGUID,
                         transcript: analysis.transcript,
                         summary: analysis.summary,
-                        durationSeconds: analysis.duration
+                        durationSeconds: analysis.duration,
+                        artworkURL: item.artworkURL
                     )
                     episodeStore.saveEpisode(completed)
                     await PodcastTranscriptCheckpoint.remove(for: item.episodeID)
@@ -484,6 +487,7 @@ private final class PodcastBacklogStore: ObservableObject {
             $0.transcriptURL = nil
             $0.transcriptType = nil
             $0.durationSeconds = nil
+            $0.artworkURL = nil
             $0.jobID = nil
             $0.status = .waiting
             $0.errorMessage = "Refreshing the exact episode from its original link..."
@@ -517,6 +521,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 $0.transcriptURL = imported.transcriptSource?.url
                 $0.transcriptType = imported.transcriptSource?.type
                 $0.durationSeconds = imported.durationSeconds
+                $0.artworkURL = imported.artworkURL
                 $0.status = .submitting
             }
             let duration = imported.durationSeconds
@@ -582,7 +587,8 @@ private final class PodcastBacklogStore: ObservableObject {
                     episodeGUID: original.episodeGUID,
                     publisherSummary: original.publisherSummary,
                     transcriptSource: original.transcriptSource,
-                    durationSeconds: original.durationSeconds
+                    durationSeconds: original.durationSeconds,
+                    artworkURL: original.artworkURL
                 )
             } else {
                 imported = try await PodcastImportService().importMetadata(from: original.sourceURL)
@@ -597,6 +603,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 $0.transcriptURL = imported.transcriptSource?.url
                 $0.transcriptType = imported.transcriptSource?.type
                 $0.durationSeconds = imported.durationSeconds
+                $0.artworkURL = imported.artworkURL
                 $0.status = .processing
                 $0.errorMessage = "Reading the complete episode..."
             }
@@ -639,7 +646,8 @@ private final class PodcastBacklogStore: ObservableObject {
                 episodeGUID: imported.episodeGUID,
                 transcript: analysis.transcript,
                 summary: analysis.summary,
-                durationSeconds: analysis.duration
+                durationSeconds: analysis.duration,
+                artworkURL: imported.artworkURL
             )
             episodeStore.saveEpisode(completedEpisode)
             await PodcastTranscriptCheckpoint.remove(for: original.episodeID)

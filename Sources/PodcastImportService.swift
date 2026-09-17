@@ -76,6 +76,7 @@ struct PodcastImportResult {
     let publisherSummary: String?
     let transcriptSource: PodcastTranscriptSource?
     let durationSeconds: Double?
+    let artworkURL: URL?
 }
 
 enum PodcastImportError: LocalizedError {
@@ -135,7 +136,8 @@ struct PodcastImportService {
                 episodeGUID: nil,
                 publisherSummary: nil,
                 transcriptSource: nil,
-                durationSeconds: nil
+                durationSeconds: nil,
+                artworkURL: nil
             ))
         }
 
@@ -160,7 +162,8 @@ struct PodcastImportService {
             episodeGUID: imported.episodeGUID,
             publisherSummary: imported.publisherSummary,
             transcriptSource: imported.transcriptSource,
-            durationSeconds: duration
+            durationSeconds: duration,
+            artworkURL: imported.artworkURL
         )
     }
 
@@ -236,8 +239,9 @@ struct PodcastImportService {
             acceptedTypes: ["application/rss+xml", "application/xml", "text/xml", "text/plain", "application/octet-stream"]
         )
         let items: [RSSImportItem]
+        let parser = RSSImportParser()
         do {
-            items = try RSSImportParser().parse(data: response.data)
+            items = try parser.parse(data: response.data)
         } catch {
             throw PodcastImportError.unsupportedLink
         }
@@ -265,7 +269,8 @@ struct PodcastImportService {
             episodeGUID: item.guid,
             publisherSummary: summary,
             transcriptSource: item.transcriptURL.map { PodcastTranscriptSource(url: $0, type: item.transcriptType) },
-            durationSeconds: parseDuration(item.duration)
+            durationSeconds: parseDuration(item.duration),
+            artworkURL: item.imageURL ?? parser.channelImageURL
         )
     }
 
@@ -287,7 +292,8 @@ struct PodcastImportService {
                 episodeGUID: nil,
                 publisherSummary: usefulPublisherSummary(metadata.summary),
                 transcriptSource: nil,
-                durationSeconds: nil
+                durationSeconds: nil,
+                artworkURL: metadata.imageURL
             )
         }
         return try await resolveFromAppleCatalog(metadata: metadata)
@@ -321,6 +327,7 @@ struct PodcastImportService {
         )
         let pageTitle = firstMatch(in: html, pattern: "<title[^>]*>([\\s\\S]*?)</title>").map(cleanHTML)
         let summary = firstHTMLValue(in: html, names: ["og:description", "twitter:description", "description"])
+        let imageValue = firstHTMLValue(in: html, names: ["og:image", "twitter:image", "twitter:image:src"])
         let audioValue = firstHTMLValue(in: html, names: ["og:audio", "og:audio:url", "twitter:player:stream"])
             ?? firstMatch(in: html, pattern: "<audio[^>]+src=[\\\"']([^\\\"']+)")
             ?? firstMatch(in: html, pattern: "\\\"contentUrl\\\"\\s*:\\s*\\\"([^\\\"]+)")
@@ -338,6 +345,7 @@ struct PodcastImportService {
             summary: summary.map(cleanHTML),
             feedURL: feedValue.flatMap { resolveURL($0, relativeTo: response.finalURL) },
             audioURL: audioValue.flatMap { resolveURL($0, relativeTo: response.finalURL) },
+            imageURL: imageValue.flatMap { resolveURL($0, relativeTo: response.finalURL) },
             isEpisode: isEpisode
         )
     }
@@ -364,7 +372,8 @@ struct PodcastImportService {
                     episodeGUID: match.episodeGuid,
                     publisherSummary: usefulPublisherSummary(match.description ?? match.shortDescription ?? metadata.summary),
                     transcriptSource: nil,
-                    durationSeconds: match.trackTimeMillis.map { $0 / 1_000 }
+                    durationSeconds: match.trackTimeMillis.map { $0 / 1_000 },
+                    artworkURL: (match.artworkUrl600 ?? match.artworkUrl100).flatMap(secureURL) ?? metadata.imageURL
                 )
             }
         }
@@ -750,6 +759,8 @@ private struct AppleLookupItem: Decodable {
     let description: String?
     let shortDescription: String?
     let trackTimeMillis: Double?
+    let artworkUrl600: String?
+    let artworkUrl100: String?
 }
 
 private struct PodcastPageMetadata {
@@ -757,6 +768,7 @@ private struct PodcastPageMetadata {
     let summary: String?
     let feedURL: URL?
     let audioURL: URL?
+    let imageURL: URL?
     let isEpisode: Bool
 }
 
@@ -769,12 +781,15 @@ private struct RSSImportItem {
     var transcriptURL: URL?
     var transcriptType: String?
     var duration: String?
+    var imageURL: URL?
 }
 
 private final class RSSImportParser: NSObject, XMLParserDelegate {
     private var items: [RSSImportItem] = []
     private var currentItem: RSSImportItem?
     private var currentText = ""
+    /// The publisher's show-level artwork, used when an episode has no artwork of its own.
+    private(set) var channelImageURL: URL?
 
     func parse(data: Data) throws -> [RSSImportItem] {
         let parser = XMLParser(data: data)
@@ -794,6 +809,15 @@ private final class RSSImportParser: NSObject, XMLParserDelegate {
     ) {
         currentText = ""
         if elementName == "item" { currentItem = RSSImportItem() }
+
+        if elementName == "itunes:image", let value = attributeDict["href"], let url = secureURL(from: value) {
+            if currentItem != nil {
+                currentItem?.imageURL = url
+            } else if channelImageURL == nil {
+                channelImageURL = url
+            }
+        }
+
         guard currentItem != nil else { return }
         if elementName == "enclosure", let value = attributeDict["url"], let url = secureURL(from: value) {
             currentItem?.audioURL = url
@@ -824,6 +848,11 @@ private final class RSSImportParser: NSObject, XMLParserDelegate {
             if currentItem?.summary?.isEmpty != false { currentItem?.summary = text }
         case "content:encoded": currentItem?.contentEncoded = text
         case "itunes:duration", "duration": currentItem?.duration = text
+        // Standard RSS 2.0 channel-level artwork: <image><url>...</url></image>.
+        case "url":
+            if currentItem == nil, channelImageURL == nil, let url = secureURL(from: text) {
+                channelImageURL = url
+            }
         case "item":
             if let currentItem { items.append(currentItem) }
             currentItem = nil

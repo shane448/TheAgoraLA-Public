@@ -42,7 +42,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     }
 
     @Published var episode: Episode = MockEpisodeProvider.sample
-    @Published private(set) var accent: EpisodeAccent = EpisodeAccent.forEpisode(MockEpisodeProvider.sample)
+    @Published private(set) var accent: EpisodeAccent = .standard
     @Published var activePrompt: Prompt?
     @Published var showPrompt = false
     @Published var answerText = ""
@@ -106,6 +106,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private var isChangingEpisode = false
     private var isApplyingPlaybackRestore = false
     private var autoContinueTask: Task<Void, Never>?
+    private var accentLoadTask: Task<Void, Never>?
     private static let narrationVoiceKey = "TheAgoraLA.NarrationVoice"
     // ".v2" avoids reinterpreting an old saved rawValue under the 3-case scheme (old 1 meant full, new 1 means balanced).
     private static let feedbackDetailLevelKey = "TheAgoraLA.FeedbackDetailLevel.v2"
@@ -261,8 +262,16 @@ final class PlayerViewModel: NSObject, ObservableObject {
         episode = updated
         promptTriggerTimes.removeAll()
         if sourceChanged {
-            withAnimation(.easeInOut(duration: 0.6)) {
-                accent = EpisodeAccent.forEpisode(updated)
+            withAnimation(.easeInOut(duration: 0.4)) {
+                accent = .standard
+            }
+            accentLoadTask?.cancel()
+            accentLoadTask = Task { [weak self] in
+                let resolved = await EpisodeAccent.resolved(for: updated.artworkURL)
+                guard let self, !Task.isCancelled, self.episode.id == updated.id else { return }
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    self.accent = resolved
+                }
             }
             isChangingEpisode = true
             preparePlaybackRestore(for: updated)

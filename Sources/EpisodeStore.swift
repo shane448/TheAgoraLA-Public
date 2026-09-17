@@ -91,7 +91,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
@@ -110,7 +111,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
@@ -127,7 +129,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
@@ -144,7 +147,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: sourceChanged ? nil : episode.transcript,
             summary: sourceChanged ? nil : episode.summary,
-            durationSeconds: sourceChanged ? nil : episode.durationSeconds
+            durationSeconds: sourceChanged ? nil : episode.durationSeconds,
+            artworkURL: sourceChanged ? nil : episode.artworkURL
         )
         persist()
     }
@@ -160,11 +164,12 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
-    
+
     func updateTranscript(_ transcript: String?) {
         episode = Episode(
             id: episode.id,
@@ -176,11 +181,12 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
-    
+
     func updateTitleAndTranscript(title: String, transcript: String?) {
         episode = Episode(
             id: episode.id,
@@ -192,11 +198,12 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
-    
+
     func replacePrompts(_ newPrompts: [Prompt]) {
         episode = Episode(
             id: episode.id,
@@ -208,7 +215,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
@@ -221,7 +229,8 @@ final class EpisodeStore: ObservableObject {
         episodeGUID: String?,
         transcript: String?,
         summary: String?,
-        durationSeconds: Double?
+        durationSeconds: Double?,
+        artworkURL: URL? = nil
     ) {
         let sourceChanged = !matchesResolvedEpisode(
             audioURL: audioURL,
@@ -238,7 +247,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: sourceChanged ? episodeGUID : (episodeGUID ?? episode.episodeGUID),
             transcript: transcript,
             summary: summary,
-            durationSeconds: sourceChanged ? durationSeconds : (durationSeconds ?? episode.durationSeconds)
+            durationSeconds: sourceChanged ? durationSeconds : (durationSeconds ?? episode.durationSeconds),
+            artworkURL: sourceChanged ? artworkURL : (artworkURL ?? episode.artworkURL)
         )
         persist()
     }
@@ -269,7 +279,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: summary,
-            durationSeconds: episode.durationSeconds
+            durationSeconds: episode.durationSeconds,
+            artworkURL: episode.artworkURL
         )
         persist()
     }
@@ -288,7 +299,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: analysis.transcript,
             summary: analysis.summary,
-            durationSeconds: analysis.duration
+            durationSeconds: analysis.duration,
+            artworkURL: episode.artworkURL
         )
         guard let url = Self.storageURL else {
             throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
@@ -313,7 +325,8 @@ final class EpisodeStore: ObservableObject {
             episodeGUID: episode.episodeGUID,
             transcript: episode.transcript,
             summary: episode.summary,
-            durationSeconds: duration
+            durationSeconds: duration,
+            artworkURL: episode.artworkURL
         )
         persist()
     }

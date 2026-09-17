@@ -635,7 +635,8 @@ struct PromptEditorView: View {
             episodeGUID: imported.episodeGUID,
             transcript: preferredTranscript,
             summary: initialSummary,
-            durationSeconds: imported.durationSeconds
+            durationSeconds: imported.durationSeconds,
+            artworkURL: imported.artworkURL
         )
     }
 
