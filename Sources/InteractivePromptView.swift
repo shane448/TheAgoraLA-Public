@@ -52,7 +52,7 @@ struct InteractivePromptView: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: handsFreeStatusIcon)
-                                .foregroundColor(AgoraTheme.accent)
+                                .foregroundColor(viewModel.accent.primary)
                             Text("Complete Hands-Free")
                                 .font(AgoraTheme.cardTitleFont)
                                 .foregroundColor(AgoraTheme.ink)
@@ -71,7 +71,7 @@ struct InteractivePromptView: View {
                                         Capsule()
                                             .fill(AgoraTheme.inkMuted.opacity(0.14))
                                         Capsule()
-                                            .fill(AgoraTheme.accentGradient)
+                                            .fill(viewModel.accent.gradient)
                                             .frame(
                                                 width: max(
                                                     8,
@@ -121,7 +121,7 @@ struct InteractivePromptView: View {
                                     .font(.system(size: 34, weight: .bold))
                                     .foregroundColor(AgoraTheme.inkOnAccent)
                                     .frame(width: 110, height: 110)
-                                    .background(Circle().fill(AgoraTheme.accentGradient))
+                                    .background(Circle().fill(viewModel.accent.gradient))
                                     .shadow(color: AgoraTheme.shadow, radius: 10, x: 0, y: 6)
                             }
                             .disabled(!viewModel.canUseDrivingMicrophone)

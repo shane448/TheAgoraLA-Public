@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AVFoundation
+import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -41,6 +42,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     }
 
     @Published var episode: Episode = MockEpisodeProvider.sample
+    @Published private(set) var accent: EpisodeAccent = EpisodeAccent.forEpisode(MockEpisodeProvider.sample)
     @Published var activePrompt: Prompt?
     @Published var showPrompt = false
     @Published var answerText = ""
@@ -259,6 +261,9 @@ final class PlayerViewModel: NSObject, ObservableObject {
         episode = updated
         promptTriggerTimes.removeAll()
         if sourceChanged {
+            withAnimation(.easeInOut(duration: 0.6)) {
+                accent = EpisodeAccent.forEpisode(updated)
+            }
             isChangingEpisode = true
             preparePlaybackRestore(for: updated)
             cancelDrivingFlow()
