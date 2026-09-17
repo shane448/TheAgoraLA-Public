@@ -379,8 +379,51 @@ struct PlaybackSettingsView: View {
                 .font(AgoraTheme.bodyFont)
                 .foregroundColor(AgoraTheme.ink)
                 .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+
+                if viewModel.interactiveModeEnabled {
+                    Divider()
+                    feedbackDetailControl
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var feedbackDetailControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Feedback After Each Answer")
+                .font(AgoraTheme.cardTitleFont)
+                .foregroundColor(AgoraTheme.ink)
+
+            Text(
+                viewModel.feedbackDetailLevel == .quick
+                    ? "Quick: hear your grade and what you missed, then the podcast resumes automatically."
+                    : "Full: see your grade, feedback, and the podcast's answer before continuing."
+            )
+            .font(AgoraTheme.tagFont)
+            .foregroundColor(AgoraTheme.inkMuted)
+
+            Slider(
+                value: Binding(
+                    get: { Double(viewModel.feedbackDetailLevel.rawValue) },
+                    set: { newValue in
+                        viewModel.feedbackDetailLevel = FeedbackDetailLevel(rawValue: Int(newValue.rounded())) ?? .full
+                    }
+                ),
+                in: 0...1,
+                step: 1
+            )
+            .tint(AgoraTheme.accent)
+            .accessibilityLabel("Feedback detail")
+            .accessibilityValue(viewModel.feedbackDetailLevel == .quick ? "Little" : "A lot")
+
+            HStack {
+                Text("Little")
+                Spacer()
+                Text("A Lot")
+            }
+            .font(AgoraTheme.tagFont)
+            .foregroundColor(AgoraTheme.inkMuted)
         }
     }
 

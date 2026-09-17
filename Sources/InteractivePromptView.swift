@@ -177,21 +177,27 @@ struct InteractivePromptView: View {
 
                         AgoraExpandableText(
                             text: viewModel.feedbackText,
-                            collapsedLineLimit: 7,
+                            collapsedLineLimit: viewModel.feedbackDetailLevel == .quick ? 3 : 7,
                             expansionThreshold: 320
                         )
 
-                        Divider()
+                        if viewModel.feedbackDetailLevel == .full {
+                            Divider()
 
-                        Text("Podcast-supported answer")
-                            .font(AgoraTheme.tagFont)
-                            .foregroundColor(AgoraTheme.inkMuted)
-                        AgoraExpandableText(
-                            text: prompt.expectedAnswer,
-                            collapsedLineLimit: 5,
-                            expansionThreshold: 240,
-                            color: AgoraTheme.ink
-                        )
+                            Text("Podcast-supported answer")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
+                            AgoraExpandableText(
+                                text: prompt.expectedAnswer,
+                                collapsedLineLimit: 5,
+                                expansionThreshold: 240,
+                                color: AgoraTheme.ink
+                            )
+                        } else if !viewModel.drivingModeEnabled {
+                            Text("Resuming the podcast...")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

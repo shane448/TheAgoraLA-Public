@@ -23,6 +23,11 @@ struct NarrationVoiceOption: Identifiable, Hashable {
     let detail: String
 }
 
+enum FeedbackDetailLevel: Int, CaseIterable {
+    case quick = 0
+    case full = 1
+}
+
 @MainActor
 final class PlayerViewModel: NSObject, ObservableObject {
     enum DrivingPromptState: Equatable {
@@ -59,6 +64,11 @@ final class PlayerViewModel: NSObject, ObservableObject {
             UserDefaults.standard.set(selectedNarrationVoiceID, forKey: Self.narrationVoiceKey)
         }
     }
+    @Published var feedbackDetailLevel: FeedbackDetailLevel {
+        didSet {
+            UserDefaults.standard.set(feedbackDetailLevel.rawValue, forKey: Self.feedbackDetailLevelKey)
+        }
+    }
     @Published private(set) var promptResponses: [UUID: PromptResponse] = [:]
     @Published private(set) var encounteredPromptIDs: [UUID] = []
 
@@ -92,7 +102,9 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private var lastPlaybackPositionWrite = Date.distantPast
     private var isChangingEpisode = false
     private var isApplyingPlaybackRestore = false
+    private var autoContinueTask: Task<Void, Never>?
     private static let narrationVoiceKey = "TheAgoraLA.NarrationVoice"
+    private static let feedbackDetailLevelKey = "TheAgoraLA.FeedbackDetailLevel"
     private static let playbackPositionKeyPrefix = "TheAgoraLA.PlaybackPosition."
 
     override init() {
@@ -102,6 +114,12 @@ final class PlayerViewModel: NSObject, ObservableObject {
         selectedNarrationVoiceID = voiceOptions.contains(where: { $0.id == savedVoiceID })
             ? (savedVoiceID ?? NarrationVoiceOption.automaticID)
             : NarrationVoiceOption.automaticID
+        if let savedLevel = UserDefaults.standard.object(forKey: Self.feedbackDetailLevelKey) as? Int,
+           let level = FeedbackDetailLevel(rawValue: savedLevel) {
+            feedbackDetailLevel = level
+        } else {
+            feedbackDetailLevel = .full
+        }
         super.init()
         speechSynthesizer.delegate = self
         loadPromptHistory(for: episode)
@@ -436,6 +454,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
         guard let prompt = activePrompt, let saved = promptResponses[prompt.id] else { return }
         guard saved.answer.trimmingCharacters(in: .whitespacesAndNewlines)
             != answerText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        autoContinueTask?.cancel()
+        autoContinueTask = nil
         feedbackText = ""
         hasScoredActivePrompt = false
     }
@@ -501,10 +521,24 @@ final class PlayerViewModel: NSObject, ObservableObject {
             drivingPromptState = .speakingFeedback
             drivingStatusText = "Reading feedback..."
             speak(text: spokenFeedback(for: result))
+        } else if feedbackDetailLevel == .quick {
+            scheduleAutoContinue(for: prompt.id)
+        }
+    }
+
+    private func scheduleAutoContinue(for promptID: UUID) {
+        autoContinueTask?.cancel()
+        autoContinueTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard let self, !Task.isCancelled else { return }
+            guard self.activePrompt?.id == promptID, self.hasScoredActivePrompt, self.showPrompt else { return }
+            self.continuePlayback()
         }
     }
 
     func continuePlayback() {
+        autoContinueTask?.cancel()
+        autoContinueTask = nil
         saveActiveDraft()
         cancelDrivingFlow()
         showPrompt = false
@@ -1214,6 +1248,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
 
     private func spokenFeedback(for result: AIResult) -> String {
         let scoreDescription = "You scored \(result.score) out of 100."
+        guard feedbackDetailLevel == .full else { return scoreDescription }
         return "\(scoreDescription) \(result.feedback)"
     }
 
