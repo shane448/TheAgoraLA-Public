@@ -535,9 +535,11 @@ final class OpenRouterClient: @unchecked Sendable {
                 system: system,
                 user: user,
                 schema: schema,
-                maxTokens: 700,
-                reasoningEffort: nil,
-                timeoutInterval: 35,
+                // Reasoning tokens draw from the same budget as the JSON, so this
+                // stays well above the response size to avoid a truncated grade.
+                maxTokens: 1_600,
+                reasoningEffort: "medium",
+                timeoutInterval: 60,
                 modelID: "openai/gpt-4.1-mini"
             )
         } catch let error as OpenRouterClientError where error.canRetryGrading {
