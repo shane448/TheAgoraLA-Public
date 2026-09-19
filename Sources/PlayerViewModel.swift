@@ -458,6 +458,13 @@ final class PlayerViewModel: NSObject, ObservableObject {
         promptResponses[prompt.id]
     }
 
+    var activePromptPosition: (number: Int, total: Int)? {
+        guard let activePrompt else { return nil }
+        let ordered = episode.prompts.sorted { $0.timestampSeconds < $1.timestampSeconds }
+        guard let index = ordered.firstIndex(where: { $0.id == activePrompt.id }) else { return nil }
+        return (index + 1, ordered.count)
+    }
+
     var canSubmitActiveAnswer: Bool {
         guard let prompt = activePrompt else { return false }
         let answer = answerText.trimmingCharacters(in: .whitespacesAndNewlines)

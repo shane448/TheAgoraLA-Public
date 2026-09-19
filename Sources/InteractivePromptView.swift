@@ -8,7 +8,16 @@ struct InteractivePromptView: View {
     var body: some View {
         AgoraCard {
             VStack(spacing: 16) {
-                HStack {
+                HStack(spacing: 10) {
+                    if let position = viewModel.activePromptPosition {
+                        Text("\(position.number)")
+                            .font(AgoraTheme.cardTitleFont)
+                            .foregroundColor(AgoraTheme.inkOnAccent)
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(viewModel.accent.gradient))
+                            .accessibilityLabel("Question \(position.number) of \(position.total)")
+                    }
+
                     Text("Agora Check-In")
                         .font(AgoraTheme.cardTitleFont)
                         .foregroundColor(AgoraTheme.ink)
