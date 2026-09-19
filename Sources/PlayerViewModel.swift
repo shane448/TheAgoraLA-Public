@@ -628,7 +628,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
         microphoneStartRetryCount = 0
         drivingPromptState = .announcingPrompt
         drivingStatusText = "Reading prompt..."
-        speak(text: "Here’s your Agora check-in. \(prompt.question) Take your time, then answer in your own words.")
+        speak(text: "Here’s your Agora check-in. \(prompt.question) Take your time.")
     }
 
     private func startListening() async {
