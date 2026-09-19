@@ -211,9 +211,19 @@ struct PlayerView: View {
                                 .foregroundColor(viewModel.accent.primary)
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(index == 0 && !viewModel.showPrompt ? "Most Recent" : "Previous Prompt")
-                                    .font(AgoraTheme.tagFont)
-                                    .foregroundColor(AgoraTheme.inkMuted)
+                                HStack(spacing: 6) {
+                                    Text(index == 0 && !viewModel.showPrompt ? "Most Recent" : "Previous Prompt")
+                                        .font(AgoraTheme.tagFont)
+                                        .foregroundColor(AgoraTheme.inkMuted)
+
+                                    Text(formatTime(prompt.timestampSeconds))
+                                        .font(AgoraTheme.tagFont)
+                                        .foregroundColor(AgoraTheme.inkMuted)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(AgoraTheme.tagBackground))
+                                        .accessibilityLabel("Asked at \(formatTime(prompt.timestampSeconds))")
+                                }
                                 Text(prompt.question)
                                     .font(AgoraTheme.bodyFont)
                                     .foregroundColor(AgoraTheme.ink)
