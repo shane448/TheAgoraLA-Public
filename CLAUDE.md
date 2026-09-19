@@ -2,7 +2,7 @@
 
 ## Project Map
 
-- `TheAgoraLA.xcodeproj`: open this project for the iOS app.
+- `TheAgoraLAPod.xcodeproj`: open this project for the iOS app.
 - `Sources/`: active SwiftUI application code.
 - `TheAgoraLA/`: app resources, `Info.plist`, privacy manifest, and assets.
 - `Backend/`: Node.js cloud analysis API and worker deployed to Railway.
@@ -61,7 +61,7 @@ npm test
 Build the iOS app:
 
 ```bash
-xcodebuild -project TheAgoraLA.xcodeproj \
+xcodebuild -project TheAgoraLAPod.xcodeproj \
   -scheme TheAgoraLA \
   -configuration Debug \
   -sdk iphonesimulator \

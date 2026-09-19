@@ -26,7 +26,7 @@ The iOS app processes the complete transcript rather than a sample:
 
 ## Open and Run
 
-Open `TheAgoraLA.xcodeproj`, select the `TheAgoraLA` scheme and an iPhone simulator, then press Run. No local backend is required because the app retains a direct-processing fallback.
+Open `TheAgoraLAPod.xcodeproj`, select the `TheAgoraLA` scheme and an iPhone simulator, then press Run. No local backend is required because the app retains a direct-processing fallback.
 
 For release, deploy the service documented in `Backend/README.md` and set the target's `AGORA_API_BASE_URL` build setting to its HTTPS origin. Long analyses then continue in the cloud after the listener leaves the app and are restored when the editor reopens.
 
@@ -47,7 +47,7 @@ The public Privacy Policy, Terms, and Support site is deployed at `https://the-a
 ## Verification
 
 ```sh
-xcodebuild -project TheAgoraLA.xcodeproj -scheme TheAgoraLA \
+xcodebuild -project TheAgoraLAPod.xcodeproj -scheme TheAgoraLA \
   -configuration Release -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath /private/tmp/TheAgoraLA-DerivedData \
