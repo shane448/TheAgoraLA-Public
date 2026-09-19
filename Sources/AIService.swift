@@ -242,13 +242,15 @@ final class AIService {
         expectedAnswer: String,
         userAnswer: String,
         transcript: String? = nil,
-        progressSeconds: Double? = nil
+        progressSeconds: Double? = nil,
+        analysisDepth: AnswerAnalysisDepth = .deepest
     ) async -> AIResult {
         do {
             let score = try await personalAI.score(
                 question: question,
                 expectedAnswer: expectedAnswer,
-                userAnswer: userAnswer
+                userAnswer: userAnswer,
+                analysisDepth: analysisDepth
             )
             let boundedScore = min(max(score.score, 0), 100)
             let grade = PromptGrade.from(score: boundedScore)

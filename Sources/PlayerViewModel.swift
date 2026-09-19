@@ -72,6 +72,11 @@ final class PlayerViewModel: NSObject, ObservableObject {
             UserDefaults.standard.set(feedbackDetailLevel.rawValue, forKey: Self.feedbackDetailLevelKey)
         }
     }
+    @Published var answerAnalysisDepth: AnswerAnalysisDepth {
+        didSet {
+            UserDefaults.standard.set(answerAnalysisDepth.rawValue, forKey: Self.answerAnalysisDepthKey)
+        }
+    }
     @Published private(set) var promptResponses: [UUID: PromptResponse] = [:]
     @Published private(set) var encounteredPromptIDs: [UUID] = []
 
@@ -110,6 +115,7 @@ final class PlayerViewModel: NSObject, ObservableObject {
     private static let narrationVoiceKey = "TheAgoraLA.NarrationVoice"
     // ".v2" avoids reinterpreting an old saved rawValue under the 3-case scheme (old 1 meant full, new 1 means balanced).
     private static let feedbackDetailLevelKey = "TheAgoraLA.FeedbackDetailLevel.v2"
+    private static let answerAnalysisDepthKey = "TheAgoraLA.AnswerAnalysisDepth"
     private static let playbackPositionKeyPrefix = "TheAgoraLA.PlaybackPosition."
 
     override init() {
@@ -124,6 +130,12 @@ final class PlayerViewModel: NSObject, ObservableObject {
             feedbackDetailLevel = level
         } else {
             feedbackDetailLevel = .full
+        }
+        if let savedDepth = UserDefaults.standard.object(forKey: Self.answerAnalysisDepthKey) as? Int,
+           let depth = AnswerAnalysisDepth(rawValue: savedDepth) {
+            answerAnalysisDepth = depth
+        } else {
+            answerAnalysisDepth = .deepest
         }
         super.init()
         speechSynthesizer.delegate = self
@@ -501,7 +513,8 @@ final class PlayerViewModel: NSObject, ObservableObject {
             expectedAnswer: prompt.expectedAnswer,
             userAnswer: answerText,
             transcript: episode.transcript,
-            progressSeconds: audioManager.currentTime
+            progressSeconds: audioManager.currentTime,
+            analysisDepth: answerAnalysisDepth
         )
 
         let previousAward = promptResponses[prompt.id]?.awardedPoints ?? 0

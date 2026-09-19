@@ -397,6 +397,8 @@ struct PlaybackSettingsView: View {
                 if viewModel.interactiveModeEnabled {
                     Divider()
                     feedbackDetailControl
+                    Divider()
+                    answerAnalysisControl
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -433,6 +435,42 @@ struct PlaybackSettingsView: View {
                 Text("Balanced")
                 Spacer()
                 Text("A Lot")
+            }
+            .font(AgoraTheme.tagFont)
+            .foregroundColor(AgoraTheme.inkMuted)
+        }
+    }
+
+    private var answerAnalysisControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Analysis Of Your Answers")
+                .font(AgoraTheme.cardTitleFont)
+                .foregroundColor(AgoraTheme.ink)
+
+            Text(answerAnalysisDescription)
+                .font(AgoraTheme.tagFont)
+                .foregroundColor(AgoraTheme.inkMuted)
+
+            Slider(
+                value: Binding(
+                    get: { Double(viewModel.answerAnalysisDepth.rawValue) },
+                    set: { newValue in
+                        viewModel.answerAnalysisDepth = AnswerAnalysisDepth(rawValue: Int(newValue.rounded())) ?? .deepest
+                    }
+                ),
+                in: 0...2,
+                step: 1
+            )
+            .tint(AgoraTheme.accent)
+            .accessibilityLabel("Answer analysis depth")
+            .accessibilityValue(answerAnalysisAccessibilityValue)
+
+            HStack {
+                Text("Faster")
+                Spacer()
+                Text("Thorough")
+                Spacer()
+                Text("Deepest")
             }
             .font(AgoraTheme.tagFont)
             .foregroundColor(AgoraTheme.inkMuted)
@@ -575,6 +613,25 @@ struct PlaybackSettingsView: View {
         case .quick: return "Little"
         case .balanced: return "Balanced"
         case .full: return "A lot"
+        }
+    }
+
+    private var answerAnalysisDescription: String {
+        switch viewModel.answerAnalysisDepth {
+        case .quick:
+            return "Faster: your answer is graded with the least waiting, and feedback stays brief."
+        case .thorough:
+            return "Thorough: the AI weighs your answer more carefully before grading it."
+        case .deepest:
+            return "Deepest: the AI takes the most time to consider your answer, for the most precise feedback."
+        }
+    }
+
+    private var answerAnalysisAccessibilityValue: String {
+        switch viewModel.answerAnalysisDepth {
+        case .quick: return "Faster"
+        case .thorough: return "Thorough"
+        case .deepest: return "Deepest"
         }
     }
 }

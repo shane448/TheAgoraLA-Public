@@ -26,6 +26,38 @@ enum PromptGrade: String, Codable {
     }
 }
 
+enum AnswerAnalysisDepth: Int, CaseIterable {
+    case quick = 0
+    case thorough = 1
+    case deepest = 2
+
+    var reasoningEffort: String {
+        switch self {
+        case .quick: return "low"
+        case .thorough: return "medium"
+        case .deepest: return "high"
+        }
+    }
+
+    // Reasoning tokens draw from the same budget as the JSON grade, so deeper
+    // settings need headroom or the response truncates into the offline fallback.
+    var maxTokens: Int {
+        switch self {
+        case .quick: return 1_100
+        case .thorough: return 1_600
+        case .deepest: return 2_400
+        }
+    }
+
+    var timeoutInterval: TimeInterval {
+        switch self {
+        case .quick: return 40
+        case .thorough: return 60
+        case .deepest: return 90
+        }
+    }
+}
+
 struct Episode: Identifiable, Codable {
     let id: UUID
     let title: String

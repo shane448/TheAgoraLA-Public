@@ -492,7 +492,12 @@ final class OpenRouterClient: @unchecked Sendable {
         return summary.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func score(question: String, expectedAnswer: String, userAnswer: String) async throws -> OpenRouterScore {
+    func score(
+        question: String,
+        expectedAnswer: String,
+        userAnswer: String,
+        analysisDepth: AnswerAnalysisDepth
+    ) async throws -> OpenRouterScore {
         let system = """
         You are a gracious and encouraging podcast-learning evaluator. Evaluate semantic understanding, not matching words. Treat concise answers and accurate paraphrases generously. Do not penalize grammar, speaking style, hesitation, brevity, or missing supporting detail when the listener communicated the central answer. Only require an exact name, number, list, or quotation when the question explicitly asks for it.
 
@@ -535,11 +540,9 @@ final class OpenRouterClient: @unchecked Sendable {
                 system: system,
                 user: user,
                 schema: schema,
-                // Reasoning tokens draw from the same budget as the JSON, so this
-                // stays well above the response size to avoid a truncated grade.
-                maxTokens: 1_600,
-                reasoningEffort: "medium",
-                timeoutInterval: 60,
+                maxTokens: analysisDepth.maxTokens,
+                reasoningEffort: analysisDepth.reasoningEffort,
+                timeoutInterval: analysisDepth.timeoutInterval,
                 modelID: "openai/gpt-4.1-mini"
             )
         } catch let error as OpenRouterClientError where error.canRetryGrading {
