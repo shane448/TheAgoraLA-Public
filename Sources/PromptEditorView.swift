@@ -9,6 +9,13 @@ private enum PromptEditorError: LocalizedError {
     }
 }
 
+private struct BrowsedEpisodeSelection {
+    let sourceText: String
+    let feedURL: URL
+    let guid: String?
+    let title: String
+}
+
 private enum PromptCountMode: String, CaseIterable, Identifiable {
     case automatic = "Automatic"
     case manual = "Manual"
@@ -42,6 +49,8 @@ struct PromptEditorView: View {
     @State private var showAdditionalPromptsStack = false
     @State private var showAIAccount = false
     @State private var showPodcastBacklog = false
+    @State private var showPodcastSearch = false
+    @State private var browsedEpisode: BrowsedEpisodeSelection?
     @State private var importTask: Task<Void, Never>?
     @State private var loadedSourceText = ""
     @State private var isLoadingSavedEpisode = false
@@ -116,12 +125,6 @@ struct PromptEditorView: View {
 
             AgoraCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Episode Title")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                    TextField("Enter title", text: $titleText)
-                        .agoraFieldStyle()
-
                     Text("Podcast URL")
                         .font(AgoraTheme.tagFont)
                         .foregroundColor(AgoraTheme.inkMuted)
@@ -145,6 +148,19 @@ struct PromptEditorView: View {
                             }
                         }
 
+                    Button {
+                        showPodcastSearch = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                            Text("Browse podcasts")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(AgoraOutlineButtonStyle())
+                    .disabled(isResolving || isPreparingTranscript)
+                    .accessibilityHint("Search podcasts and pick an episode without leaving Agora")
+
                     if hasPendingSourceChange {
                         Label("New podcast link ready to import", systemImage: "arrow.triangle.2.circlepath")
                             .font(AgoraTheme.tagFont)
@@ -154,6 +170,12 @@ struct PromptEditorView: View {
                     Text("Paste an episode or show link from Spotify, Apple Podcasts, Pocket Casts, Overcast, Amazon Music, iHeart, YouTube Music, a public RSS feed, or a direct audio link.")
                         .font(AgoraTheme.tagFont)
                         .foregroundColor(AgoraTheme.inkMuted)
+
+                    Text("Episode Title")
+                        .font(AgoraTheme.tagFont)
+                        .foregroundColor(AgoraTheme.inkMuted)
+                    TextField("Fills in after import", text: $titleText)
+                        .agoraFieldStyle()
 
                     Text("Episode Summary")
                         .font(AgoraTheme.tagFont)
@@ -437,6 +459,11 @@ struct PromptEditorView: View {
             PodcastBacklogView(episodeStore: episodeStore)
                 .environmentObject(aiAccount)
         }
+        .sheet(isPresented: $showPodcastSearch) {
+            PodcastSearchView { feedURL, guid, title in
+                applyBrowsedEpisode(feedURL: feedURL, guid: guid, title: title)
+            }
+        }
     }
 
     private var hasUsableAI: Bool {
@@ -468,6 +495,26 @@ struct PromptEditorView: View {
         isLoadingSavedEpisode = false
     }
 
+    /// A browsed episode fills the URL field with its show's feed and remembers
+    /// which episode was picked, then runs the same import the paste path runs.
+    @MainActor
+    private func applyBrowsedEpisode(feedURL: URL, guid: String?, title: String) {
+        let sourceText = normalizedSourceText(feedURL.absoluteString)
+        audioURLText = feedURL.absoluteString
+        browsedEpisode = BrowsedEpisodeSelection(
+            sourceText: sourceText,
+            feedURL: feedURL,
+            guid: guid,
+            title: title
+        )
+        guard hasUsableAI else {
+            showAIAccount = true
+            return
+        }
+        guard !isResolving, !isPreparingTranscript else { return }
+        importTask = Task { await importAndSaveEpisode() }
+    }
+
     @MainActor
     private func importAndSaveEpisode() async {
         guard !isResolving, !isPreparingTranscript else { return }
@@ -481,7 +528,17 @@ struct PromptEditorView: View {
         do {
             let inputURL = try validatedInputURL()
             let requestedSourceText = normalizedSourceText(inputURL.absoluteString)
-            let imported = try await PodcastImportService().importMetadata(from: inputURL)
+            let service = PodcastImportService()
+            let imported: PodcastImportResult
+            if let selection = browsedEpisode, selection.sourceText == requestedSourceText {
+                imported = try await service.importEpisode(
+                    feedURL: selection.feedURL,
+                    guid: selection.guid,
+                    title: selection.title
+                )
+            } else {
+                imported = try await service.importMetadata(from: inputURL)
+            }
             try Task.checkCancellation()
             guard normalizedSourceText(audioURLText) == requestedSourceText else {
                 importStatusText = "The podcast link changed before import finished. Tap Import, Analyze & Save again to use the new link."
@@ -1082,21 +1139,6 @@ private struct AdditionalPromptsCarousel: View {
     }
 }
 
-private extension View {
-    func agoraFieldStyle() -> some View {
-        self
-            .font(AgoraTheme.bodyFont)
-            .foregroundColor(AgoraTheme.ink)
-            .tint(AgoraTheme.accent)
-            .padding(12)
-            .background(Color.white.opacity(0.85))
-            .cornerRadius(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(AgoraTheme.cardStroke, lineWidth: 1)
-            )
-    }
-}
 private actor PlayerDurationProvider {
     static let shared = PlayerDurationProvider()
     private init() {}

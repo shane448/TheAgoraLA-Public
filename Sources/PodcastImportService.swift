@@ -105,6 +105,26 @@ enum PodcastImportError: LocalizedError {
     }
 }
 
+/// A show returned by a catalog search, enough to render a browse row.
+struct PodcastCatalogShow: Identifiable, Hashable {
+    let id: Int64
+    let title: String
+    let author: String?
+    let artworkURL: URL?
+    let feedURL: URL?
+}
+
+/// One episode from a browsed show's feed. Selecting it imports by feed and
+/// GUID, which is the same match a pasted Apple link resolves to.
+struct PodcastCatalogEpisode: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let summary: String?
+    let releaseDate: Date?
+    let durationSeconds: Double?
+    let guid: String?
+}
+
 struct PodcastImportService {
     private static let networkSession: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -750,14 +770,18 @@ private struct AppleLookupResponse: Decodable {
 
 private struct AppleLookupItem: Decodable {
     let trackId: Int64?
+    let collectionId: Int64?
     let wrapperType: String?
     let feedUrl: String?
     let trackName: String?
+    let artistName: String?
     let episodeGuid: String?
     let collectionName: String?
     let previewUrl: String?
     let description: String?
     let shortDescription: String?
+    let releaseDate: String?
+    let trackCount: Int?
     let trackTimeMillis: Double?
     let artworkUrl600: String?
     let artworkUrl100: String?
@@ -775,6 +799,7 @@ private struct PodcastPageMetadata {
 private struct RSSImportItem {
     var title: String?
     var guid: String?
+    var pubDate: String?
     var summary: String?
     var contentEncoded: String?
     var audioURL: URL?
@@ -844,6 +869,7 @@ private final class RSSImportParser: NSObject, XMLParserDelegate {
         switch elementName {
         case "title": currentItem?.title = text
         case "guid": currentItem?.guid = text
+        case "pubDate": currentItem?.pubDate = text
         case "description", "itunes:summary":
             if currentItem?.summary?.isEmpty != false { currentItem?.summary = text }
         case "content:encoded": currentItem?.contentEncoded = text
@@ -868,5 +894,92 @@ private final class RSSImportParser: NSObject, XMLParserDelegate {
         }
         guard components.scheme?.lowercased() == "https" else { return nil }
         return components.url
+    }
+}
+
+// MARK: - Catalog browsing
+//
+// The importer already searches Apple's catalog to resolve a pasted link; that
+// same search backs the browse screen. Episodes come from the show's feed
+// rather than Apple's episode lookup, which truncates badly (five episodes for
+// some shows), and the feed is what an import resolves against anyway.
+extension PodcastImportService {
+    func searchShows(term: String) async throws -> [PodcastCatalogShow] {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let results = try await searchAppleCatalog(term: trimmed, entity: "podcast")
+        return results.compactMap { item in
+            guard let id = item.collectionId ?? item.trackId else { return nil }
+            let name = normalizeWhitespace(item.collectionName ?? item.trackName ?? "")
+            guard !name.isEmpty else { return nil }
+            let author = item.artistName.map(normalizeWhitespace).flatMap { $0.isEmpty ? nil : $0 }
+            return PodcastCatalogShow(
+                id: id,
+                title: name,
+                author: author,
+                artworkURL: (item.artworkUrl600 ?? item.artworkUrl100).flatMap { secureURL(from: $0) },
+                feedURL: item.feedUrl.flatMap { secureURL(from: $0) }
+            )
+        }
+    }
+
+    func episodes(inFeed feedURL: URL) async throws -> [PodcastCatalogEpisode] {
+        let response = try await downloadData(
+            from: feedURL,
+            maximumBytes: 15_000_000,
+            acceptedTypes: [
+                "application/rss+xml", "application/xml", "text/xml",
+                "text/plain", "application/octet-stream",
+            ]
+        )
+        let items: [RSSImportItem]
+        do {
+            items = try RSSImportParser().parse(data: response.data)
+        } catch {
+            throw PodcastImportError.unsupportedLink
+        }
+
+        return items.enumerated().compactMap { index, item in
+            guard item.audioURL != nil else { return nil }
+            let title = normalizeWhitespace(item.title ?? "")
+            guard !title.isEmpty else { return nil }
+            return PodcastCatalogEpisode(
+                id: "\(index)-\(item.guid ?? title)",
+                title: title,
+                summary: usefulPublisherSummary(item.summary ?? item.contentEncoded),
+                releaseDate: parsePublishedDate(item.pubDate),
+                durationSeconds: parseDuration(item.duration),
+                guid: item.guid
+            )
+        }
+    }
+
+    /// Imports the exact episode picked while browsing. `importFeed` already
+    /// matches an episode by GUID, so this is the pasted-Apple-link path with
+    /// the catalog lookup skipped.
+    func importEpisode(feedURL: URL, guid: String?, title: String) async throws -> PodcastImportResult {
+        let metadata = AppleEpisodeMetadata(guid: guid, title: title)
+        return await ensuringReliableDuration(try await importFeed(feedURL, matching: metadata))
+    }
+
+    private func parsePublishedDate(_ value: String?) -> Date? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        // Feeds in the wild use both numeric offsets and named zones ("PST").
+        let formats = [
+            "EEE, dd MMM yyyy HH:mm:ss Z",
+            "EEE, dd MMM yyyy HH:mm Z",
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "EEE, dd MMM yyyy HH:mm zzz",
+            "dd MMM yyyy HH:mm:ss Z",
+        ]
+        for format in formats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) { return date }
+        }
+        return ISO8601DateFormatter().date(from: value)
     }
 }

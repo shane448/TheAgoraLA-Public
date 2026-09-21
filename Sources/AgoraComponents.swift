@@ -197,3 +197,19 @@ struct AgoraBackgroundView: View {
         }
     }
 }
+
+extension View {
+    func agoraFieldStyle() -> some View {
+        self
+            .font(AgoraTheme.bodyFont)
+            .foregroundColor(AgoraTheme.ink)
+            .tint(AgoraTheme.accent)
+            .padding(12)
+            .background(Color.white.opacity(0.85))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+            )
+    }
+}

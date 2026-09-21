@@ -32,6 +32,7 @@
 		B202C0017A1E4A8B9C0D1E03 /* OpenRouterClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B202C0017A1E4A8B9C0D1E13 /* OpenRouterClient.swift */; };
 		C30100000000000000000001 /* AppLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30100000000000000000011 /* AppLinks.swift */; };
 		D40100000000000000000001 /* PodcastBacklogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40100000000000000000011 /* PodcastBacklogView.swift */; };
+		D40100000000000000000099 /* PodcastSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40100000000000000000098 /* PodcastSearchView.swift */; };
 		F07C4CB318F74C69AC4B7489 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F429C6E820141EDA4E468C5 /* PlayerView.swift */; };
 		FCFB3669C58C4B8DA0491E01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AAB59ADF251F446BADC09262 /* Assets.xcassets */; };
 		FE2518203AE843559DA3DEAB /* PromptEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C7D58B0A4C04D7F9BDB641B /* PromptEditorView.swift */; };
@@ -68,6 +69,7 @@
 		D7A73052939B46278D556316 /* AgoraTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgoraTheme.swift; sourceTree = "<group>"; };
 		D9E03FC50B034441855325F7 /* EpisodeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeStore.swift; sourceTree = "<group>"; };
 		D40100000000000000000011 /* PodcastBacklogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastBacklogView.swift; sourceTree = "<group>"; };
+		D40100000000000000000098 /* PodcastSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastSearchView.swift; sourceTree = "<group>"; };
 		DCBF56C40C904E97AB0BACF0 /* PlayerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -132,6 +134,7 @@
 				DCBF56C40C904E97AB0BACF0 /* PlayerViewModel.swift */,
 				A0F5C07173AF4EAFA730435A /* PointsStore.swift */,
 				D40100000000000000000011 /* PodcastBacklogView.swift */,
+				D40100000000000000000098 /* PodcastSearchView.swift */,
 				B102C0017A1E4A8B9C0D1E05 /* PodcastImportService.swift */,
 				B102C0017A1E4A8B9C0D1E01 /* PointsProgressView.swift */,
 				8C7D58B0A4C04D7F9BDB641B /* PromptEditorView.swift */,
@@ -231,6 +234,7 @@
 				5C8F8E8D55A541109A233038 /* PlayerViewModel.swift in Sources */,
 				6880DB960C50450A81F0297F /* PointsStore.swift in Sources */,
 				D40100000000000000000001 /* PodcastBacklogView.swift in Sources */,
+				D40100000000000000000099 /* PodcastSearchView.swift in Sources */,
 				B102C0017A1E4A8B9C0D1E06 /* PodcastImportService.swift in Sources */,
 				B102C0017A1E4A8B9C0D1E02 /* PointsProgressView.swift in Sources */,
 				54B5F3652F3877570080EA3F /* PlayerDurationCache.swift in Sources */,
