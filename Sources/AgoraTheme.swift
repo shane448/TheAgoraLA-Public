@@ -81,6 +81,9 @@ enum AgoraTheme {
     private static let obsidianMuted = Color(red: 0.33, green: 0.34, blue: 0.36)
     private static let bronze = Color(red: 0.77, green: 0.55, blue: 0.24)
     private static let terracotta = Color(red: 0.74, green: 0.33, blue: 0.23)
-    private static let lapis = Color(red: 0.16, green: 0.30, blue: 0.55)
-    private static let lapisDeep = Color(red: 0.10, green: 0.20, blue: 0.42)
+    // Built like the bronze/terracotta pair: saturation held steady and the hue
+    // swept, rather than one hue darkened, so the blue catches light the way the
+    // orange does instead of reading as a solid slab.
+    private static let lapis = Color(red: 0.17, green: 0.40, blue: 0.58)
+    private static let lapisDeep = Color(red: 0.17, green: 0.24, blue: 0.55)
 }
