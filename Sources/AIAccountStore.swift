@@ -8,6 +8,7 @@ enum AIPowerLevel: String, CaseIterable, Identifiable {
     case balanced
     case economical
     case maximum
+    case free
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum AIPowerLevel: String, CaseIterable, Identifiable {
         case .balanced: return "Balanced"
         case .economical: return "Economical"
         case .maximum: return "Maximum quality"
+        case .free: return "Free model"
         }
     }
 
@@ -24,6 +26,7 @@ enum AIPowerLevel: String, CaseIterable, Identifiable {
         case .balanced: return "Strong analysis with moderate cost"
         case .economical: return "Fastest and lowest-cost option"
         case .maximum: return "Deepest analysis at a higher cost"
+        case .free: return "Open model at no charge. Scanning and grading still cost a few cents, and free capacity is rate limited."
         }
     }
 
@@ -32,6 +35,7 @@ enum AIPowerLevel: String, CaseIterable, Identifiable {
         case .balanced: return "openai/gpt-5.6-terra"
         case .economical: return "openai/gpt-5.6-luna"
         case .maximum: return "openai/gpt-6-astra"
+        case .free: return "nvidia/nemotron-3-super-120b-a12b:free"
         }
     }
 }
