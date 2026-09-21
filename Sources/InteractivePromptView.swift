@@ -14,7 +14,7 @@ struct InteractivePromptView: View {
                             .font(AgoraTheme.cardTitleFont)
                             .foregroundColor(AgoraTheme.inkOnAccent)
                             .frame(width: 26, height: 26)
-                            .background(Circle().fill(viewModel.accent.gradient))
+                            .background(Circle().fill(AgoraTheme.accentGradient))
                             .accessibilityLabel("Question \(position.number) of \(position.total)")
                     }
 
@@ -61,7 +61,7 @@ struct InteractivePromptView: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: handsFreeStatusIcon)
-                                .foregroundColor(viewModel.accent.primary)
+                                .foregroundColor(AgoraTheme.accent)
                             Text("Complete Hands-Free")
                                 .font(AgoraTheme.cardTitleFont)
                                 .foregroundColor(AgoraTheme.ink)
@@ -80,7 +80,7 @@ struct InteractivePromptView: View {
                                         Capsule()
                                             .fill(AgoraTheme.inkMuted.opacity(0.14))
                                         Capsule()
-                                            .fill(viewModel.accent.gradient)
+                                            .fill(AgoraTheme.accentGradient)
                                             .frame(
                                                 width: max(
                                                     8,
@@ -130,7 +130,7 @@ struct InteractivePromptView: View {
                                     .font(.system(size: 34, weight: .bold))
                                     .foregroundColor(AgoraTheme.inkOnAccent)
                                     .frame(width: 110, height: 110)
-                                    .background(Circle().fill(viewModel.accent.gradient))
+                                    .background(Circle().fill(AgoraTheme.accentGradient))
                                     .shadow(color: AgoraTheme.shadow, radius: 10, x: 0, y: 6)
                             }
                             .disabled(!viewModel.canUseDrivingMicrophone)

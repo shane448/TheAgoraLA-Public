@@ -20,7 +20,6 @@
 		6880DB960C50450A81F0297F /* PointsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F5C07173AF4EAFA730435A /* PointsStore.swift */; };
 		71A100000000000000000002 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 71A100000000000000000001 /* PrivacyInfo.xcprivacy */; };
 		98E73F5324B246FEB7C0D896 /* EpisodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E03FC50B034441855325F7 /* EpisodeStore.swift */; };
-		EA0000000000000000000001 /* EpisodeAccent.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA0000000000000000000011 /* EpisodeAccent.swift */; };
 		A203DAD3BD27422E91B5F212 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66088B3AA6FE4E9D89481445 /* AIService.swift */; };
 		C10D00000000000000000001 /* CloudAnalysisClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10D00000000000000000011 /* CloudAnalysisClient.swift */; };
 		A5028BB863CB4B9B966CD992 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B0D364C26C4A6DA402C364 /* Models.swift */; };
@@ -40,7 +39,6 @@
 
 /* Begin PBXFileReference section */
 		06B0D364C26C4A6DA402C364 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		EA0000000000000000000011 /* EpisodeAccent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeAccent.swift; sourceTree = "<group>"; };
 		0C56CF91ADD446C496ED0F9A /* MockEpisodeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockEpisodeProvider.swift; sourceTree = "<group>"; };
 		0D52757C74534546B8BB111F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		388DCC0A208C439DB2BAA022 /* AgoraComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgoraComponents.swift; sourceTree = "<group>"; };
@@ -124,7 +122,6 @@
 				BBF31C3CA5C24E4997ECBC63 /* AudioPlayerManager.swift */,
 				3F8860E69FF34DFEB4BEB498 /* ContentView.swift */,
 				C10D00000000000000000011 /* CloudAnalysisClient.swift */,
-				EA0000000000000000000011 /* EpisodeAccent.swift */,
 				D9E03FC50B034441855325F7 /* EpisodeStore.swift */,
 				B102C0017A1E4A8B9C0D1E03 /* EpisodeTranscriptView.swift */,
 				3D700D956A164F9BAA62967B /* InteractivePromptView.swift */,
@@ -226,7 +223,6 @@
 				C10D00000000000000000001 /* CloudAnalysisClient.swift in Sources */,
 				B102C0017A1E4A8B9C0D1E04 /* EpisodeTranscriptView.swift in Sources */,
 				98E73F5324B246FEB7C0D896 /* EpisodeStore.swift in Sources */,
-				EA0000000000000000000001 /* EpisodeAccent.swift in Sources */,
 				3B0607BD6B87444A8F669AF0 /* InteractivePromptView.swift in Sources */,
 				4634D2F94C7E45D7AB4A9C55 /* MockEpisodeProvider.swift in Sources */,
 				B202C0017A1E4A8B9C0D1E03 /* OpenRouterClient.swift in Sources */,
