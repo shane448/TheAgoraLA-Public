@@ -14,7 +14,7 @@ struct InteractivePromptView: View {
                             .font(AgoraTheme.cardTitleFont)
                             .foregroundColor(AgoraTheme.inkOnAccent)
                             .frame(width: 26, height: 26)
-                            .background(Circle().fill(AgoraTheme.accentGradient))
+                            .background(Circle().fill(promptAccentGradient))
                             .accessibilityLabel("Question \(position.number) of \(position.total)")
                     }
 
@@ -61,7 +61,7 @@ struct InteractivePromptView: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: handsFreeStatusIcon)
-                                .foregroundColor(AgoraTheme.accent)
+                                .foregroundColor(promptAccent)
                             Text("Complete Hands-Free")
                                 .font(AgoraTheme.cardTitleFont)
                                 .foregroundColor(AgoraTheme.ink)
@@ -80,7 +80,7 @@ struct InteractivePromptView: View {
                                         Capsule()
                                             .fill(AgoraTheme.inkMuted.opacity(0.14))
                                         Capsule()
-                                            .fill(AgoraTheme.accentGradient)
+                                            .fill(promptAccentGradient)
                                             .frame(
                                                 width: max(
                                                     8,
@@ -130,7 +130,7 @@ struct InteractivePromptView: View {
                                     .font(.system(size: 34, weight: .bold))
                                     .foregroundColor(AgoraTheme.inkOnAccent)
                                     .frame(width: 110, height: 110)
-                                    .background(Circle().fill(AgoraTheme.accentGradient))
+                                    .background(Circle().fill(promptAccentGradient))
                                     .shadow(color: AgoraTheme.shadow, radius: 10, x: 0, y: 6)
                             }
                             .disabled(!viewModel.canUseDrivingMicrophone)
@@ -241,6 +241,14 @@ struct InteractivePromptView: View {
         .onChange(of: viewModel.answerText) { _ in
             viewModel.activeAnswerDidChange()
         }
+    }
+
+    private var promptAccent: Color {
+        viewModel.drivingModeEnabled ? AgoraTheme.handsFreeAccent : AgoraTheme.accent
+    }
+
+    private var promptAccentGradient: LinearGradient {
+        viewModel.drivingModeEnabled ? AgoraTheme.handsFreeAccentGradient : AgoraTheme.accentGradient
     }
 
     private var handsFreeStatusIcon: String {

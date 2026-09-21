@@ -32,6 +32,14 @@ enum AgoraTheme {
         endPoint: .bottomTrailing
     )
 
+    /// The Now Playing surface switches to this while Complete Hands-Free is on,
+    /// so a glance tells you the player is listening rather than waiting on taps.
+    static let handsFreeAccentGradient = LinearGradient(
+        gradient: Gradient(colors: [lapis, lapisDeep]),
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     static let cardStroke = Color.white.opacity(0.6)
     static let cardSurface = Color(red: 0.99, green: 0.98, blue: 0.96)
     static let tagBackground = Color.white.opacity(0.7)
@@ -40,6 +48,7 @@ enum AgoraTheme {
     static let inkMuted = obsidianMuted
     static let inkOnAccent = Color.white
     static let accent = bronze
+    static let handsFreeAccent = lapis
     static let progressTrack = obsidian.opacity(0.20)
     static let shadow = Color.black.opacity(0.15)
 
@@ -73,4 +82,5 @@ enum AgoraTheme {
     private static let bronze = Color(red: 0.77, green: 0.55, blue: 0.24)
     private static let terracotta = Color(red: 0.74, green: 0.33, blue: 0.23)
     private static let lapis = Color(red: 0.16, green: 0.30, blue: 0.55)
+    private static let lapisDeep = Color(red: 0.10, green: 0.20, blue: 0.42)
 }

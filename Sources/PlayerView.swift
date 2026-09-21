@@ -29,6 +29,7 @@ struct PlayerView: View {
 
                     VStack(spacing: 8) {
                         PodcastProgressSlider(
+                            tintColor: playerAccent,
                             value: Binding(
                                 get: { isScrubbing ? scrubPosition : viewModel.currentTime },
                                 set: { scrubPosition = $0 }
@@ -92,7 +93,7 @@ struct PlayerView: View {
                                 .font(.system(size: 18, weight: .semibold))
                                 .frame(width: 56, height: 56)
                                 .background(
-                                    Circle().fill(AgoraTheme.accentGradient)
+                                    Circle().fill(playerAccentGradient)
                                 )
                                 .foregroundColor(AgoraTheme.inkOnAccent)
                                 .shadow(color: AgoraTheme.shadow, radius: 8, x: 0, y: 4)
@@ -119,7 +120,7 @@ struct PlayerView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "waveform.and.mic")
                             .font(.system(size: 22, weight: .semibold))
-                            .foregroundColor(AgoraTheme.accent)
+                            .foregroundColor(playerAccent)
                             .frame(width: 30)
 
                         Text("Complete Hands-Free")
@@ -135,11 +136,12 @@ struct PlayerView: View {
                             )
                         )
                         .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: AgoraTheme.accent))
+                        .toggleStyle(SwitchToggleStyle(tint: playerAccent))
                         .accessibilityLabel("Complete Hands-Free")
                     }
                 }
             }
+            .animation(.easeInOut(duration: 0.4), value: viewModel.drivingModeEnabled)
             .padding(.horizontal, 16)
 
             if viewModel.showPrompt, let prompt = viewModel.activePrompt {
@@ -206,7 +208,7 @@ struct PlayerView: View {
                                   ? "questionmark.circle"
                                   : "checkmark.circle.fill")
                                 .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(AgoraTheme.accent)
+                                .foregroundColor(playerAccent)
 
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
@@ -266,10 +268,21 @@ struct PlayerView: View {
         return String(format: "%d:%02d", minutes, remainingSeconds)
     }
 
+    /// Complete Hands-Free repaints the Now Playing controls; the rest of the
+    /// app keeps the fixed brand accent.
+    private var playerAccent: Color {
+        viewModel.drivingModeEnabled ? AgoraTheme.handsFreeAccent : AgoraTheme.accent
+    }
+
+    private var playerAccentGradient: LinearGradient {
+        viewModel.drivingModeEnabled ? AgoraTheme.handsFreeAccentGradient : AgoraTheme.accentGradient
+    }
+
 }
 
 #if canImport(UIKit)
 private struct PodcastProgressSlider: UIViewRepresentable {
+    let tintColor: Color
     @Binding var value: Double
     let range: ClosedRange<Double>
     let onEditingChanged: (Bool) -> Void
@@ -281,7 +294,7 @@ private struct PodcastProgressSlider: UIViewRepresentable {
     func makeUIView(context: Context) -> PodcastUISlider {
         let slider = PodcastUISlider(frame: .zero)
         slider.isContinuous = true
-        slider.minimumTrackTintColor = UIColor(AgoraTheme.accent)
+        slider.minimumTrackTintColor = UIColor(tintColor)
         slider.maximumTrackTintColor = UIColor(AgoraTheme.progressTrack)
         slider.thumbTintColor = .white
         slider.addTarget(context.coordinator, action: #selector(Coordinator.editingBegan(_:)), for: .touchDown)
@@ -299,7 +312,9 @@ private struct PodcastProgressSlider: UIViewRepresentable {
         context.coordinator.onEditingChanged = onEditingChanged
         slider.minimumValue = Float(range.lowerBound)
         slider.maximumValue = Float(range.upperBound)
-        slider.minimumTrackTintColor = UIColor(AgoraTheme.accent)
+        UIView.animate(withDuration: 0.4) {
+            slider.minimumTrackTintColor = UIColor(tintColor)
+        }
         slider.maximumTrackTintColor = UIColor(AgoraTheme.progressTrack)
         if !slider.isTracking {
             slider.setValue(Float(min(max(value, range.lowerBound), range.upperBound)), animated: false)
