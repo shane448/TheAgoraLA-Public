@@ -460,8 +460,9 @@ struct PromptEditorView: View {
                 .environmentObject(aiAccount)
         }
         .sheet(isPresented: $showPodcastSearch) {
-            PodcastSearchView { feedURL, guid, title in
-                applyBrowsedEpisode(feedURL: feedURL, guid: guid, title: title)
+            PodcastSearchView { picks in
+                guard let pick = picks.first else { return }
+                applyBrowsedEpisode(feedURL: pick.feedURL, guid: pick.guid, title: pick.title)
             }
         }
     }

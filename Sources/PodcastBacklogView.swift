@@ -28,10 +28,23 @@ private enum PodcastBacklogStatus: String, Codable {
     }
 }
 
+private struct PodcastBrowsedPick: Codable, Hashable {
+    let guid: String?
+    let title: String
+
+    var matchKey: String {
+        if let guid, !guid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return guid }
+        return title
+    }
+}
+
 private struct PodcastBacklogItem: Identifiable, Codable {
     let id: UUID
     let episodeID: UUID
     let sourceURL: URL
+    /// Set when the item came from browsing: `sourceURL` is then the show's
+    /// feed and this picks one episode out of it. Absent for pasted links.
+    var browsedPick: PodcastBrowsedPick?
     var title: String?
     var audioURL: URL?
     var feedURL: URL?
@@ -53,6 +66,14 @@ private struct PodcastBacklogItem: Identifiable, Codable {
 
     var transcriptSource: PodcastTranscriptSource? {
         transcriptURL.map { PodcastTranscriptSource(url: $0, type: transcriptType) }
+    }
+
+    /// Two episodes of one show share a feed URL, so the picked episode is part
+    /// of what makes a backlog entry distinct.
+    var identity: String {
+        let base = PodcastSourceParser.identity(for: sourceURL)
+        guard let browsedPick else { return base }
+        return "\(base)#\(browsedPick.matchKey)"
     }
 }
 
@@ -252,7 +273,7 @@ private final class PodcastBacklogStore: ObservableObject {
 
         for url in unique {
             let identity = normalizedURL(url)
-            guard let index = items.firstIndex(where: { normalizedURL($0.sourceURL) == identity }) else {
+            guard let index = items.firstIndex(where: { $0.identity == identity }) else {
                 newURLs.append(url)
                 continue
             }
@@ -277,6 +298,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 id: UUID(),
                 episodeID: UUID(),
                 sourceURL: url,
+                browsedPick: nil,
                 title: nil,
                 audioURL: nil,
                 feedURL: nil,
@@ -309,6 +331,70 @@ private final class PodcastBacklogStore: ObservableObject {
             notice = "That podcast is already prepared and ready to listen to below."
         } else {
             notice = "Those podcasts are already in your backlog."
+        }
+        return true
+    }
+
+    /// Queues episodes chosen in the browse sheet. They arrive already
+    /// identified, so there is nothing to parse out of pasted text.
+    func addBrowsedEpisodes(_ picks: [PodcastSearchSelection]) -> Bool {
+        guard !picks.isEmpty else { return false }
+
+        var additions: [PodcastBacklogItem] = []
+        var restoredCount = 0
+        var duplicateCount = 0
+        var seen = Set<String>()
+
+        for pick in picks {
+            let candidate = PodcastBacklogItem(
+                id: UUID(),
+                episodeID: UUID(),
+                sourceURL: pick.feedURL,
+                browsedPick: PodcastBrowsedPick(guid: pick.guid, title: pick.title),
+                title: pick.title,
+                audioURL: nil,
+                feedURL: pick.feedURL,
+                episodeGUID: pick.guid,
+                publisherSummary: nil,
+                transcriptURL: nil,
+                transcriptType: nil,
+                durationSeconds: nil,
+                artworkURL: nil,
+                jobID: nil,
+                status: .waiting,
+                errorMessage: nil,
+                createdAt: Date()
+            )
+            guard seen.insert(candidate.identity).inserted else { continue }
+
+            if let index = items.firstIndex(where: { $0.identity == candidate.identity }) {
+                if items[index].status == .failed {
+                    items[index].status = .waiting
+                    items[index].jobID = nil
+                    items[index].errorMessage = nil
+                    restoredCount += 1
+                } else {
+                    duplicateCount += 1
+                }
+                continue
+            }
+            additions.append(candidate)
+        }
+
+        items.append(contentsOf: additions)
+        persist()
+
+        if additions.isEmpty, restoredCount == 0 {
+            notice = duplicateCount == 1
+                ? "That episode is already in your backlog."
+                : "Those episodes are already in your backlog."
+            return false
+        }
+        if restoredCount > 0, additions.isEmpty {
+            notice = "Restored \(restoredCount) failed episode\(restoredCount == 1 ? "" : "s"). Analysis will begin automatically."
+        } else {
+            let skipped = duplicateCount > 0 ? " \(duplicateCount) already queued." : ""
+            notice = "Added \(additions.count) episode\(additions.count == 1 ? "" : "s"). Starting analysis...\(skipped)"
         }
         return true
     }
@@ -504,6 +590,20 @@ private final class PodcastBacklogStore: ObservableObject {
         }
     }
 
+    /// Browsed items carry a feed plus the GUID of the episode chosen from it;
+    /// pasted items are resolved from their link as before.
+    private func resolveImport(for item: PodcastBacklogItem) async throws -> PodcastImportResult {
+        let service = PodcastImportService()
+        guard let pick = item.browsedPick else {
+            return try await service.importMetadata(from: item.sourceURL)
+        }
+        return try await service.importEpisode(
+            feedURL: item.sourceURL,
+            guid: pick.guid,
+            title: pick.title
+        )
+    }
+
     private func submit(id: UUID, providerKey: String) async {
         guard let original = item(with: id) else { return }
         update(id) {
@@ -511,7 +611,7 @@ private final class PodcastBacklogStore: ObservableObject {
             $0.errorMessage = nil
         }
         do {
-            let imported = try await PodcastImportService().importMetadata(from: original.sourceURL)
+            let imported = try await resolveImport(for: original)
             update(id) {
                 $0.title = imported.title
                 $0.audioURL = imported.audioURL
@@ -591,7 +691,7 @@ private final class PodcastBacklogStore: ObservableObject {
                     artworkURL: original.artworkURL
                 )
             } else {
-                imported = try await PodcastImportService().importMetadata(from: original.sourceURL)
+                imported = try await resolveImport(for: original)
             }
 
             update(id) {
@@ -729,6 +829,7 @@ struct PodcastBacklogView: View {
     @EnvironmentObject private var aiAccount: AIAccountStore
     @StateObject private var backlog = PodcastBacklogStore()
     @State private var linkDrafts = [PodcastLinkDraft()]
+    @State private var showPodcastSearch = false
     @State private var showAIAccount = false
     @FocusState private var focusedLinkID: UUID?
 
@@ -796,6 +897,17 @@ struct PodcastBacklogView: View {
             AIAccountView()
                 .environmentObject(aiAccount)
         }
+        .sheet(isPresented: $showPodcastSearch) {
+            PodcastSearchView(mode: .multiple) { picks in
+                addBrowsedAndStart(picks)
+            }
+        }
+    }
+
+    private func addBrowsedAndStart(_ picks: [PodcastSearchSelection]) {
+        focusedLinkID = nil
+        guard backlog.addBrowsedEpisodes(picks) else { return }
+        Task { await backlog.startAll(episodeStore: episodeStore) }
     }
 
     private var header: some View {
@@ -841,12 +953,24 @@ struct PodcastBacklogView: View {
     private var addLinksCard: some View {
         AgoraCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Add Podcast Links")
+                Text("Add Podcasts")
                     .font(AgoraTheme.cardTitleFont)
                     .foregroundColor(AgoraTheme.ink)
-                Text("Paste one episode, show, public RSS feed, or direct audio link into each slot. Copied share messages also work.")
+                Text("Browse for episodes, or paste one episode, show, public RSS feed, or direct audio link into each slot. Copied share messages also work.")
                     .font(AgoraTheme.tagFont)
                     .foregroundColor(AgoraTheme.inkMuted)
+
+                Button {
+                    showPodcastSearch = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                        Text("Browse Podcasts")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(AgoraOutlineButtonStyle())
+                .accessibilityHint("Search podcasts and pick several episodes for the backlog")
 
                 ForEach(Array(linkDrafts.enumerated()), id: \.element.id) { index, draft in
                     let position = index + 1
