@@ -54,19 +54,21 @@ struct PromptEditorView: View {
     @State private var importTask: Task<Void, Never>?
     @State private var loadedSourceText = ""
     @State private var isLoadingSavedEpisode = false
+    @State private var episodeDetailsExpanded = false
+    @State private var addPromptExpanded = false
 
     var body: some View {
         let visiblePrompts = Array(episodeStore.episode.prompts.prefix(3))
         let additionalPrompts = Array(episodeStore.episode.prompts.dropFirst(3))
 
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Episode Setup")
+                    Text("Edit Episode & Prompts")
                         .font(AgoraTheme.cardTitleFont)
                         .foregroundColor(AgoraTheme.ink)
 
-                    Text("Update your audio source and prompts below.")
+                    Text("Work through the steps below. Changes to prompts save automatically.")
                         .font(AgoraTheme.tagFont)
                         .foregroundColor(AgoraTheme.inkMuted)
                 }
@@ -100,32 +102,15 @@ struct PromptEditorView: View {
                 }
             }
 
-            Button {
-                showPodcastBacklog = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "rectangle.stack.badge.plus")
-                        .font(.system(size: 21, weight: .semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Build a Podcast Backlog")
-                            .font(AgoraTheme.buttonFont)
-                        Text("Analyze several episodes in the cloud")
-                            .font(AgoraTheme.tagFont)
-                            .opacity(0.9)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .bold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-            }
-            .buttonStyle(AgoraPillButtonStyle())
-            .accessibilityHint("Opens the multi-episode podcast analysis queue")
-
             AgoraCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Podcast URL")
+                    editorStepHeader(
+                        number: 1,
+                        title: "Choose an Episode",
+                        detail: "Paste a link or browse for a podcast."
+                    )
+
+                    Text("Podcast Link")
                         .font(AgoraTheme.tagFont)
                         .foregroundColor(AgoraTheme.inkMuted)
                     TextField("https://...", text: $audioURLText)
@@ -148,18 +133,16 @@ struct PromptEditorView: View {
                             }
                         }
 
-                    Button {
-                        showPodcastSearch = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                            Text("Browse podcasts")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) {
+                            browsePodcastsButton
+                            podcastBacklogButton
                         }
-                        .frame(maxWidth: .infinity)
+                        VStack(spacing: 10) {
+                            browsePodcastsButton
+                            podcastBacklogButton
+                        }
                     }
-                    .buttonStyle(AgoraOutlineButtonStyle())
-                    .disabled(isResolving || isPreparingTranscript)
-                    .accessibilityHint("Search podcasts and pick an episode without leaving Agora")
 
                     if hasPendingSourceChange {
                         Label("New podcast link ready to import", systemImage: "arrow.triangle.2.circlepath")
@@ -170,74 +153,47 @@ struct PromptEditorView: View {
                     Text("Paste an episode or show link from Spotify, Apple Podcasts, Pocket Casts, Overcast, Amazon Music, iHeart, YouTube Music, a public RSS feed, or a direct audio link.")
                         .font(AgoraTheme.tagFont)
                         .foregroundColor(AgoraTheme.inkMuted)
+                }
+            }
 
-                    Text("Episode Title")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                    TextField("Fills in after import", text: $titleText)
-                        .agoraFieldStyle()
-
-                    Text("Episode Summary")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                    AgoraExpandableText(
-                        text: summaryText.isEmpty ? "A useful episode summary will appear after import." : summaryText,
-                        collapsedLineLimit: 4,
-                        expansionThreshold: 260,
-                        color: summaryText.isEmpty ? AgoraTheme.inkMuted : AgoraTheme.ink
+            AgoraCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    editorStepHeader(
+                        number: 2,
+                        title: "Analyze & Save",
+                        detail: "Let AI choose the right number of questions, or set it yourself."
                     )
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.85))
-                        .cornerRadius(14)
 
-                    Text("Episode Transcript")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                    if transcriptExpanded {
-                        TextEditor(text: $transcriptText)
-                            .scrollContentBackground(.hidden)
-                            .foregroundColor(AgoraTheme.ink)
-                            .background(Color.clear)
-                            .frame(minHeight: 200)
-                            .padding(10)
-                            .background(Color.white.opacity(0.85))
-                            .cornerRadius(14)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(AgoraTheme.cardStroke, lineWidth: 1)
-                            )
+                    Picker("Prompt Count", selection: $promptCountMode) {
+                        ForEach(PromptCountMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isResolving || isPreparingTranscript)
+
+                    if promptCountMode == .manual {
                         HStack {
+                            Text("Number of prompts")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
                             Spacer()
-                            Button("Show less") { transcriptExpanded = false }
-                                .buttonStyle(AgoraOutlineButtonStyle())
+                            Menu {
+                                ForEach(3...12, id: \.self) { count in
+                                    Button("\(count) prompts") {
+                                        selectedPromptCount = count
+                                    }
+                                }
+                            } label: {
+                                Text("\(selectedPromptCount) prompts")
+                            }
+                            .buttonStyle(AgoraOutlineButtonStyle())
+                            .disabled(isResolving || isPreparingTranscript)
                         }
                     } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("No transcript yet")
-                                    .font(AgoraTheme.tagFont)
-                                    .foregroundColor(AgoraTheme.inkMuted)
-                            } else {
-                                Text(transcriptText)
-                                    .font(AgoraTheme.bodyFont)
-                                    .foregroundColor(AgoraTheme.ink)
-                                    .lineLimit(4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            HStack {
-                                Spacer()
-                                Button("Show more") { transcriptExpanded = true }
-                                    .buttonStyle(AgoraOutlineButtonStyle())
-                            }
-                        }
-                        .padding(10)
-                        .background(Color.white.opacity(0.85))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(AgoraTheme.cardStroke, lineWidth: 1)
-                        )
+                        Text("Automatic adapts to episode length, content depth, and the number of important ideas.")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
                     }
 
                     Button("Import, Analyze & Save") {
@@ -279,45 +235,66 @@ struct PromptEditorView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Prompt Count", selection: $promptCountMode) {
-                        ForEach(PromptCountMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+            AgoraCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            episodeDetailsExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            editorStepHeader(
+                                number: 3,
+                                title: "Review Episode Details",
+                                detail: episodeDetailsSummary
+                            )
+                            Spacer()
+                            Image(systemName: episodeDetailsExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(AgoraTheme.accent)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .disabled(isResolving || isPreparingTranscript)
+                    .buttonStyle(.plain)
 
-                    if promptCountMode == .manual {
-                        Menu {
-                            ForEach(3...12, id: \.self) { count in
-                                Button("\(count) prompts") {
-                                    selectedPromptCount = count
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text("Prompt Count")
-                                Text("\(selectedPromptCount)")
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .buttonStyle(AgoraOutlineButtonStyle())
-                        .disabled(isResolving || isPreparingTranscript)
-                    } else {
-                        Text("Automatic uses episode length, content depth, and the number of important ideas.")
+                    if episodeDetailsExpanded {
+                        Divider()
+
+                        Text("Episode Title")
                             .font(AgoraTheme.tagFont)
                             .foregroundColor(AgoraTheme.inkMuted)
+                        TextField("Fills in after import", text: $titleText)
+                            .agoraFieldStyle()
+
+                        Text("Episode Summary")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                        AgoraExpandableText(
+                            text: summaryText.isEmpty ? "A useful episode summary will appear after import." : summaryText,
+                            collapsedLineLimit: 4,
+                            expansionThreshold: 260,
+                            color: summaryText.isEmpty ? AgoraTheme.inkMuted : AgoraTheme.ink
+                        )
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.white.opacity(0.85))
+                            .cornerRadius(14)
+
+                        Text("Episode Transcript")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                        transcriptEditor
                     }
                 }
-
             }
 
-            Text("Prompts")
-                .font(AgoraTheme.cardTitleFont)
-                .foregroundColor(AgoraTheme.ink)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            editorStepHeader(
+                number: 4,
+                title: "Review Prompts",
+                detail: episodeStore.episode.prompts.isEmpty
+                    ? "Generated questions will appear here."
+                    : "\(episodeStore.episode.prompts.count) questions saved automatically."
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if !episodeStore.episode.prompts.isEmpty {
                 AgoraCard {
@@ -368,51 +345,75 @@ struct PromptEditorView: View {
             }
 
             AgoraCard {
-                VStack(spacing: 10) {
-                    Text("Add New Prompt")
-                        .font(AgoraTheme.cardTitleFont)
-                        .foregroundColor(AgoraTheme.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            addPromptExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundColor(AgoraTheme.accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Add a Prompt Manually")
+                                    .font(AgoraTheme.cardTitleFont)
+                                    .foregroundColor(AgoraTheme.ink)
+                                Text("Optional: create your own question and answer.")
+                                    .font(AgoraTheme.tagFont)
+                                    .foregroundColor(AgoraTheme.inkMuted)
+                            }
+                            Spacer()
+                            Image(systemName: addPromptExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(AgoraTheme.accent)
+                        }
+                    }
+                    .buttonStyle(.plain)
 
-                    TextField("Answer heard by (seconds)", text: $newTimestamp)
-                        .keyboardType(.decimalPad)
-                        .agoraFieldStyle()
+                    if addPromptExpanded {
+                        Divider()
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Extra Delay: \(Int(newLeadTime))s after answer")
+                        TextField("Answer heard by (seconds)", text: $newTimestamp)
+                            .keyboardType(.decimalPad)
+                            .agoraFieldStyle()
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Extra Delay: \(Int(newLeadTime))s after answer")
+                                    .font(AgoraTheme.tagFont)
+                                    .foregroundColor(AgoraTheme.inkMuted)
+                                Spacer()
+                                Menu {
+                                    ForEach([0, 5, 10, 15, 20, 30], id: \.self) { step in
+                                        Button("\(step)s") { newLeadTime = Double(step) }
+                                    }
+                                } label: {
+                                    Text("Quick Select")
+                                }
+                                .buttonStyle(AgoraOutlineButtonStyle())
+                            }
+                            Slider(value: $newLeadTime, in: 0...60, step: 5)
+                        }
+                        .padding(.top, 4)
+
+                        TextField("Question", text: $newQuestion)
+                            .agoraFieldStyle()
+
+                        TextField("Expected answer", text: $newAnswer)
+                            .agoraFieldStyle()
+
+                        Button("Add Prompt") {
+                            addPrompt()
+                        }
+                        .buttonStyle(AgoraPillButtonStyle())
+                        .disabled(promptValidationMessage != nil)
+
+                        if let promptValidationMessage {
+                            Text(promptValidationMessage)
                                 .font(AgoraTheme.tagFont)
                                 .foregroundColor(AgoraTheme.inkMuted)
-                            Spacer()
-                            Menu {
-                                ForEach([0, 5, 10, 15, 20, 30], id: \.self) { step in
-                                    Button("\(step)s") { newLeadTime = Double(step) }
-                                }
-                            } label: {
-                                Text("Quick Select")
-                            }
-                            .buttonStyle(AgoraOutlineButtonStyle())
                         }
-                        Slider(value: $newLeadTime, in: 0...60, step: 5)
-                    }
-                    .padding(.top, 4)
-
-                    TextField("Question", text: $newQuestion)
-                        .agoraFieldStyle()
-
-                    TextField("Expected answer", text: $newAnswer)
-                        .agoraFieldStyle()
-
-                    Button("Add Prompt") {
-                        addPrompt()
-                    }
-                    .buttonStyle(AgoraPillButtonStyle())
-                    .disabled(promptValidationMessage != nil)
-
-                    if let promptValidationMessage {
-                        Text(promptValidationMessage)
-                            .font(AgoraTheme.tagFont)
-                            .foregroundColor(AgoraTheme.inkMuted)
                     }
                 }
             }
@@ -465,6 +466,105 @@ struct PromptEditorView: View {
                 applyBrowsedEpisode(feedURL: pick.feedURL, guid: pick.guid, title: pick.title)
             }
         }
+    }
+
+    private func editorStepHeader(number: Int, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Text("\(number)")
+                .font(AgoraTheme.buttonFont)
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(AgoraTheme.accent))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(AgoraTheme.cardTitleFont)
+                    .foregroundColor(AgoraTheme.ink)
+                Text(detail)
+                    .font(AgoraTheme.tagFont)
+                    .foregroundColor(AgoraTheme.inkMuted)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var browsePodcastsButton: some View {
+        Button {
+            showPodcastSearch = true
+        } label: {
+            Label("Browse Podcasts", systemImage: "magnifyingglass")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(AgoraOutlineButtonStyle())
+        .disabled(isResolving || isPreparingTranscript)
+        .accessibilityHint("Search podcasts and pick an episode without leaving Agora")
+    }
+
+    private var podcastBacklogButton: some View {
+        Button {
+            showPodcastBacklog = true
+        } label: {
+            Label("Podcast Backlog", systemImage: "rectangle.stack.badge.plus")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(AgoraOutlineButtonStyle())
+        .disabled(isResolving || isPreparingTranscript)
+        .accessibilityHint("Opens the multi-episode podcast analysis queue")
+    }
+
+    @ViewBuilder
+    private var transcriptEditor: some View {
+        if transcriptExpanded {
+            TextEditor(text: $transcriptText)
+                .scrollContentBackground(.hidden)
+                .foregroundColor(AgoraTheme.ink)
+                .background(Color.clear)
+                .frame(minHeight: 200)
+                .padding(10)
+                .background(Color.white.opacity(0.85))
+                .cornerRadius(14)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+                )
+            HStack {
+                Spacer()
+                Button("Show less") { transcriptExpanded = false }
+                    .buttonStyle(AgoraOutlineButtonStyle())
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                if transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No transcript yet")
+                        .font(AgoraTheme.tagFont)
+                        .foregroundColor(AgoraTheme.inkMuted)
+                } else {
+                    Text(transcriptText)
+                        .font(AgoraTheme.bodyFont)
+                        .foregroundColor(AgoraTheme.ink)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack {
+                    Spacer()
+                    Button("Show more") { transcriptExpanded = true }
+                        .buttonStyle(AgoraOutlineButtonStyle())
+                }
+            }
+            .padding(10)
+            .background(Color.white.opacity(0.85))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(AgoraTheme.cardStroke, lineWidth: 1)
+            )
+        }
+    }
+
+    private var episodeDetailsSummary: String {
+        let title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty { return "Title, summary, and full transcript." }
+        return title
     }
 
     private var hasUsableAI: Bool {
@@ -909,6 +1009,7 @@ private struct PromptRow: View {
     @State private var leadTimeSeconds: Double
     @State private var showFullQuestion = false
     @State private var showFullAnswer = false
+    @State private var isExpanded = false
 
     init(index: Int, prompt: Prompt, episodeDuration: Double, onDelete: @escaping () -> Void, onUpdate: @escaping (Prompt) -> Void) {
         self.index = index
@@ -925,115 +1026,146 @@ private struct PromptRow: View {
     var body: some View {
         AgoraCard {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Ask after: \(formatSeconds(timestampSeconds))")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-
-                    Spacer()
-
-                    AgoraTag(text: positionLabel)
-
-                    Button("Delete") {
-                        onDelete()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
                     }
-                    .buttonStyle(AgoraOutlineButtonStyle())
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Text("Prompt \(index + 1)")
+                                    .font(AgoraTheme.cardTitleFont)
+                                    .foregroundColor(AgoraTheme.ink)
+                                AgoraTag(text: positionLabel)
+                            }
+                            Text(question.isEmpty ? "Untitled question" : question)
+                                .font(AgoraTheme.bodyFont)
+                                .foregroundColor(AgoraTheme.ink)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Text("Ask after \(formatSeconds(timestampSeconds))")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
+                        }
+                        Spacer()
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(AgoraTheme.accent)
+                            .padding(.top, 5)
+                    }
                 }
+                .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 6) {
+                if isExpanded {
+                    Divider()
+
                     HStack {
-                        Text("Answer heard by")
+                        Text("Prompt \(index + 1) settings")
                             .font(AgoraTheme.tagFont)
                             .foregroundColor(AgoraTheme.inkMuted)
                         Spacer()
-                        Menu {
-                            ForEach(quickSelectTimestamps, id: \.self) { value in
-                                Button("\(formatSeconds(value))") { timestampSeconds = value }
-                            }
-                        } label: {
-                            Text("Quick Select")
+                        Button("Delete") {
+                            onDelete()
                         }
                         .buttonStyle(AgoraOutlineButtonStyle())
                     }
-                    Slider(value: $timestampSeconds, in: timestampRange, step: timestampStep)
-                }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Extra Delay: \(Int(leadTimeSeconds))s after answer")
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Answer heard by")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
+                            Spacer()
+                            Menu {
+                                ForEach(quickSelectTimestamps, id: \.self) { value in
+                                    Button("\(formatSeconds(value))") { timestampSeconds = value }
+                                }
+                            } label: {
+                                Text("Quick Select")
+                            }
+                            .buttonStyle(AgoraOutlineButtonStyle())
+                        }
+                        Slider(value: $timestampSeconds, in: timestampRange, step: timestampStep)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Extra Delay: \(Int(leadTimeSeconds))s after answer")
+                                .font(AgoraTheme.tagFont)
+                                .foregroundColor(AgoraTheme.inkMuted)
+                            Spacer()
+                            Menu {
+                                ForEach([0, 5, 10, 15, 20, 30], id: \.self) { step in
+                                    Button("\(step)s") { leadTimeSeconds = Double(step) }
+                                }
+                            } label: {
+                                Text("Quick Select")
+                            }
+                            .buttonStyle(AgoraOutlineButtonStyle())
+                        }
+                        Slider(value: $leadTimeSeconds, in: 0...60, step: 5)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Question")
                             .font(AgoraTheme.tagFont)
                             .foregroundColor(AgoraTheme.inkMuted)
-                        Spacer()
-                        Menu {
-                            ForEach([0, 5, 10, 15, 20, 30], id: \.self) { step in
-                                Button("\(step)s") { leadTimeSeconds = Double(step) }
+
+                        if showFullQuestion {
+                            TextEditor(text: $question)
+                                .scrollContentBackground(.hidden)
+                                .foregroundColor(AgoraTheme.ink)
+                                .background(Color.clear)
+                                .frame(height: 130)
+                                .agoraFieldStyle()
+                        } else {
+                            TextField("Question", text: $question)
+                                .agoraFieldStyle()
+                        }
+
+                        HStack {
+                            Spacer()
+                            Button(showFullQuestion ? "Show less" : "Show more") {
+                                showFullQuestion.toggle()
                             }
-                        } label: {
-                            Text("Quick Select")
+                            .buttonStyle(AgoraOutlineButtonStyle())
                         }
-                        .buttonStyle(AgoraOutlineButtonStyle())
-                    }
-                    Slider(value: $leadTimeSeconds, in: 0...60, step: 5)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Question")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-
-                    if showFullQuestion {
-                        TextEditor(text: $question)
-                            .scrollContentBackground(.hidden)
-                            .foregroundColor(AgoraTheme.ink)
-                            .background(Color.clear)
-                            .frame(height: 130)
-                            .agoraFieldStyle()
-                    } else {
-                        TextField("Question", text: $question)
-                            .agoraFieldStyle()
                     }
 
-                    HStack {
-                        Spacer()
-                        Button(showFullQuestion ? "Show less" : "Show more") {
-                            showFullQuestion.toggle()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Expected Answer")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+
+                        if showFullAnswer {
+                            TextEditor(text: $expectedAnswer)
+                                .scrollContentBackground(.hidden)
+                                .foregroundColor(AgoraTheme.ink)
+                                .background(Color.clear)
+                                .frame(height: 130)
+                                .agoraFieldStyle()
+                        } else {
+                            TextField("Expected answer", text: $expectedAnswer)
+                                .agoraFieldStyle()
                         }
-                        .buttonStyle(AgoraOutlineButtonStyle())
-                    }
-                }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Expected Answer")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-
-                    if showFullAnswer {
-                        TextEditor(text: $expectedAnswer)
-                            .scrollContentBackground(.hidden)
-                            .foregroundColor(AgoraTheme.ink)
-                            .background(Color.clear)
-                            .frame(height: 130)
-                            .agoraFieldStyle()
-                    } else {
-                        TextField("Expected answer", text: $expectedAnswer)
-                            .agoraFieldStyle()
-                    }
-
-                    HStack {
-                        Spacer()
-                        Button(showFullAnswer ? "Show less" : "Show more") {
-                            showFullAnswer.toggle()
+                        HStack {
+                            Spacer()
+                            Button(showFullAnswer ? "Show less" : "Show more") {
+                                showFullAnswer.toggle()
+                            }
+                            .buttonStyle(AgoraOutlineButtonStyle())
                         }
-                        .buttonStyle(AgoraOutlineButtonStyle())
                     }
-                }
 
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(AgoraTheme.accent)
-                    Text("Changes save automatically")
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(AgoraTheme.accent)
+                        Text("Changes save automatically")
+                            .font(AgoraTheme.tagFont)
+                            .foregroundColor(AgoraTheme.inkMuted)
+                    }
                 }
             }
         }
