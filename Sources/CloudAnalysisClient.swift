@@ -81,6 +81,7 @@ struct CloudAnalysisClient {
         promptCount: Int?,
         model: String,
         providerAPIKey: String,
+        forceRefresh: Bool = false,
         progress: @escaping (String) -> Void
     ) async throws -> (EpisodeAnalysisResult, URL, UUID) {
         progress("Securely sending the episode to cloud analysis...")
@@ -93,6 +94,7 @@ struct CloudAnalysisClient {
             promptCount: promptCount,
             model: model,
             providerAPIKey: providerAPIKey,
+            forceRefresh: forceRefresh,
             rememberAsCurrent: true
         )
         progress("Cloud analysis is running. You can safely leave the app and return later.")
@@ -108,6 +110,7 @@ struct CloudAnalysisClient {
         promptCount: Int?,
         model: String,
         providerAPIKey: String,
+        forceRefresh: Bool = false,
         rememberAsCurrent: Bool = false
     ) async throws -> PendingCloudAnalysis {
         var body: [String: Any] = [
@@ -115,6 +118,7 @@ struct CloudAnalysisClient {
             "audio_url": audioURL.absoluteString,
             "model": model,
             "provider_api_key": providerAPIKey,
+            "force_refresh": forceRefresh,
         ]
         if let promptCount {
             body["prompt_count"] = min(max(promptCount, 3), 12)

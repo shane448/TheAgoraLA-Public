@@ -415,6 +415,15 @@ function questionEvidenceAlignment(prompt: EpisodePrompt): number {
 }
 
 function evidenceTimestamp(prompt: EpisodePrompt, normalizedTranscript: string, duration: number): number {
+  const suppliedEnd = Math.max(0, ...prompt.evidence.map((item) => (
+    Number.isFinite(item.end_seconds) && item.end_seconds >= 0 && item.end_seconds <= duration
+      ? item.end_seconds
+      : 0
+  )));
+  if (suppliedEnd > 0) {
+    return Math.min(Math.max(suppliedEnd + 3, 1), Math.max(duration, 1));
+  }
+
   let latestEnd = 0;
   for (const item of prompt.evidence) {
     const quote = normalizedText(item.quote);

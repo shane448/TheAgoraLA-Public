@@ -35,6 +35,7 @@ const analysisJobSchema = z.object({
   duration: z.number().positive().max(86_400).optional(),
   prompt_count: z.number().int().min(3).max(12).optional(),
   model: z.string().trim().min(3).max(150).optional(),
+  force_refresh: z.boolean().optional().default(false),
   provider_api_key: z.string().trim().startsWith("sk-or-").max(500),
 }).refine(
   (value) => Boolean(value.audio_url || value.transcript || value.transcript_url),
@@ -49,7 +50,7 @@ const scoreSchema = z.object({
 });
 
 const publicDirectory = new URL("../public/", import.meta.url);
-const analysisPipelineVersion = "2026-09-13.1";
+const analysisPipelineVersion = "2026-09-25.1";
 
 interface AnalysisJobRow {
   id: string;
@@ -265,7 +266,7 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
   app.post("/v1/episode-jobs", { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } }, async (request, reply) => {
     const session = await requireSession(request.headers.authorization, config);
     const parsed = analysisJobSchema.parse(request.body);
-    const { provider_api_key: providerAPIKey, ...input } = parsed;
+    const { provider_api_key: providerAPIKey, force_refresh: forceRefresh, ...input } = parsed;
     const sourceHash = createHash("sha256").update(JSON.stringify({
       pipeline_version: analysisPipelineVersion,
       title: input.title?.replace(/\s+/g, " ").trim() ?? null,
@@ -282,7 +283,7 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
     try {
       await withTransaction(database, async (client) => {
         await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [session.userID]);
-        const existing = await client.query<AnalysisJobRow>(
+        const existing = forceRefresh ? { rows: [] as AnalysisJobRow[] } : await client.query<AnalysisJobRow>(
           `SELECT id, status, result, error, created_at, completed_at
            FROM analysis_jobs
            WHERE user_id = $1 AND source_hash = $2 AND status IN ('queued', 'processing', 'complete')

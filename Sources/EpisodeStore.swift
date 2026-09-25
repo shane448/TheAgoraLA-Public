@@ -9,6 +9,7 @@ final class EpisodeStore: ObservableObject {
     private let storageKey = "TheAgoraLA.Episode.Data"
     private static let retiredDemoID = UUID(uuidString: "A60DD4CF-8B21-4A03-9D36-E43EC6C351AE")!
     private var libraryLoadTask: Task<[Episode], Never>?
+    private var promptPersistenceTask: Task<Void, Never>?
 
     private static var storageURL: URL? {
         guard let applicationSupport = FileManager.default.urls(
@@ -114,7 +115,7 @@ final class EpisodeStore: ObservableObject {
             durationSeconds: episode.durationSeconds,
             artworkURL: episode.artworkURL
         )
-        persist()
+        persistPromptsAfterTyping()
     }
 
     func deletePrompt(_ prompt: Prompt) {
@@ -331,12 +332,25 @@ final class EpisodeStore: ObservableObject {
         persist()
     }
 
-    func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) {
-        upsertSavedEpisode(savedEpisode)
-        if makeActive {
+    func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) throws {
+        let replacesActiveEpisode = savedEpisode.id == episode.id
+        var updatedLibrary = savedEpisodes
+        if let index = updatedLibrary.firstIndex(where: { $0.id == savedEpisode.id }) {
+            updatedLibrary[index] = savedEpisode
+        } else {
+            updatedLibrary.insert(savedEpisode, at: 0)
+        }
+        if isLibraryLoaded, let libraryURL = Self.libraryStorageURL {
+            try JSONEncoder().encode(updatedLibrary).write(to: libraryURL, options: .atomic)
+        }
+        if makeActive || replacesActiveEpisode {
+            guard let storageURL = Self.storageURL else {
+                throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
+            }
+            try JSONEncoder().encode(savedEpisode).write(to: storageURL, options: .atomic)
             episode = savedEpisode
         }
-        persist()
+        savedEpisodes = updatedLibrary
     }
 
     @discardableResult
@@ -358,6 +372,15 @@ final class EpisodeStore: ObservableObject {
         try? data.write(to: url, options: .atomic)
         syncActiveEpisodeIntoLibrary()
         persistLibrary()
+    }
+
+    private func persistPromptsAfterTyping() {
+        promptPersistenceTask?.cancel()
+        promptPersistenceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            self?.persist()
+        }
     }
 
     private func syncActiveEpisodeIntoLibrary() {

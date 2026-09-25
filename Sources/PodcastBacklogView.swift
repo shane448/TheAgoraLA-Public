@@ -133,6 +133,7 @@ private final class PodcastBacklogStore: ObservableObject {
 
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var lifecycleObservers: [NSObjectProtocol] = []
+    private var forceRefreshIDs = Set<UUID>()
 
     init() {
         if let url = Self.storageURL,
@@ -152,6 +153,7 @@ private final class PodcastBacklogStore: ObservableObject {
         } else {
             items = []
         }
+        cloudUnavailable = !CloudAnalysisClient.isConfigured
         observeAppLifecycle()
     }
 
@@ -213,7 +215,7 @@ private final class PodcastBacklogStore: ObservableObject {
             cloudUnavailable = false
         } catch {
             cloudUnavailable = true
-            notice = "Cloud preparation is offline. Your backlog is saved; you can prepare new podcasts on this iPhone. Preparation keeps running if you lock your phone or switch apps — just don't force-quit Agora."
+            notice = "Cloud preparation is offline. Your backlog is saved. On-phone preparation may pause after you lock your phone or switch apps, and resumes when Agora is reopened."
         }
     }
 
@@ -404,10 +406,6 @@ private final class PodcastBacklogStore: ObservableObject {
             notice = "New podcasts will join as soon as the current submissions finish."
             return
         }
-        guard CloudAnalysisClient.isConfigured else {
-            notice = "Background analysis needs the Agora cloud service configured in this build."
-            return
-        }
         guard let providerKey = AIAccountStore.apiKey() else {
             notice = "Connect your AI account before starting the backlog."
             return
@@ -432,12 +430,14 @@ private final class PodcastBacklogStore: ObservableObject {
             guard !ids.isEmpty else { break }
             attemptedIDs.formUnion(ids)
 
-            if cloudUnavailable {
+            if !CloudAnalysisClient.isConfigured {
+                cloudUnavailable = true
                 isUsingDirectFallback = true
                 await prepareDirectly(ids: ids, episodeStore: episodeStore)
                 isUsingDirectFallback = false
                 continue
             }
+
             notice = "Checking the background analysis service..."
             do {
                 try await CloudAnalysisClient().verifyAvailability()
@@ -517,7 +517,7 @@ private final class PodcastBacklogStore: ObservableObject {
                         durationSeconds: analysis.duration,
                         artworkURL: item.artworkURL
                     )
-                    episodeStore.saveEpisode(completed)
+                    try episodeStore.saveEpisode(completed)
                     await PodcastTranscriptCheckpoint.remove(for: item.episodeID)
                     update(id) {
                         $0.status = .complete
@@ -536,7 +536,7 @@ private final class PodcastBacklogStore: ObservableObject {
                     update(id) {
                         $0.errorMessage = "The cloud service is offline. This job is saved and will refresh when it returns."
                     }
-                    notice = "Cloud preparation is offline. Existing jobs are saved; new podcasts can be prepared on this iPhone. Preparation keeps running if you lock your phone or switch apps — just don't force-quit Agora."
+                    notice = "Cloud preparation is offline. Existing jobs are saved. On-phone preparation may pause in the background and resumes when Agora is reopened."
                     break
                 }
                 if message == "Analysis job not found." {
@@ -562,8 +562,9 @@ private final class PodcastBacklogStore: ObservableObject {
         }
     }
 
-    func reanalyze(_ id: UUID) {
+    func reanalyze(_ id: UUID) async {
         guard let episodeID = item(with: id)?.episodeID else { return }
+        forceRefreshIDs.insert(id)
         update(id) {
             $0.title = nil
             $0.audioURL = nil
@@ -578,7 +579,7 @@ private final class PodcastBacklogStore: ObservableObject {
             $0.status = .waiting
             $0.errorMessage = "Refreshing the exact episode from its original link..."
         }
-        Task { await PodcastTranscriptCheckpoint.remove(for: episodeID) }
+        await PodcastTranscriptCheckpoint.remove(for: episodeID)
     }
 
     func remove(_ id: UUID) {
@@ -633,8 +634,10 @@ private final class PodcastBacklogStore: ObservableObject {
                 duration: duration,
                 promptCount: nil,
                 model: AIAccountStore.selectedModelID(),
-                providerAPIKey: providerKey
+                providerAPIKey: providerKey,
+                forceRefresh: forceRefreshIDs.contains(id)
             )
+            forceRefreshIDs.remove(id)
             update(id) {
                 $0.jobID = pending.jobID
                 $0.status = .queued
@@ -654,7 +657,7 @@ private final class PodcastBacklogStore: ObservableObject {
     private func prepareDirectly(ids: [UUID], episodeStore: EpisodeStore) async {
         await episodeStore.loadLibraryIfNeeded()
         for (offset, id) in ids.enumerated() {
-            notice = "Cloud background processing is unavailable. Preparing podcast \(offset + 1) of \(ids.count) through your connected AI. You can lock your phone or switch apps; just don't force-quit Agora until it's done."
+            notice = "Cloud background processing is unavailable. Preparing podcast \(offset + 1) of \(ids.count) through your connected AI. Keep Agora open for the fastest result; interrupted work is saved for retry."
             await prepareDirectly(id: id, episodeStore: episodeStore)
         }
 
@@ -749,7 +752,8 @@ private final class PodcastBacklogStore: ObservableObject {
                 durationSeconds: analysis.duration,
                 artworkURL: imported.artworkURL
             )
-            episodeStore.saveEpisode(completedEpisode)
+            try episodeStore.saveEpisode(completedEpisode)
+            forceRefreshIDs.remove(id)
             await PodcastTranscriptCheckpoint.remove(for: original.episodeID)
             update(id) {
                 $0.status = .complete
@@ -861,8 +865,10 @@ struct PodcastBacklogView: View {
                                     Task { await backlog.startAll(episodeStore: episodeStore) }
                                 },
                                 onReanalyze: {
-                                    backlog.reanalyze(item.id)
-                                    Task { await backlog.startAll(episodeStore: episodeStore) }
+                                    Task {
+                                        await backlog.reanalyze(item.id)
+                                        await backlog.startAll(episodeStore: episodeStore)
+                                    }
                                 },
                                 onRemove: {
                                     Task {
@@ -938,9 +944,9 @@ struct PodcastBacklogView: View {
                         .foregroundColor(AgoraTheme.ink)
                     Text(
                         backlog.isUsingDirectFallback
-                            ? "Each episode is prepared through your connected AI. You can lock your phone or switch to another app and it will keep going — just don't force-quit Agora until it's done. Completed podcasts are saved immediately."
+                            ? "Each episode is prepared through your connected AI. Keep Agora open for on-phone preparation; interrupted work is saved and can resume when you return."
                             : backlog.cloudUnavailable
-                                ? "Your links and existing cloud jobs are saved. New episodes can be prepared here even if you lock your phone or switch apps, as long as you don't force-quit Agora; cloud jobs will refresh when the service returns."
+                                ? "Your links and existing cloud jobs are saved. On-phone preparation may pause in the background; cloud jobs refresh when the service returns."
                                 : "Once every item says Queued or Analyzing, you may close Agora. Return later and choose any completed episode."
                     )
                         .font(AgoraTheme.bodyFont)

@@ -11,6 +11,7 @@ interface ClaimedJob {
   input: AnalysisJobInput;
   credit_cost: number;
   provider_credential_encrypted: string;
+  claim_token: string;
 }
 
 export function startAnalysisWorker(database: Database, config: AppConfig) {
@@ -65,8 +66,8 @@ export function startAnalysisWorker(database: Database, config: AppConfig) {
 async function processClaimedJob(database: Database, config: AppConfig, job: ClaimedJob): Promise<void> {
   const heartbeat = setInterval(() => {
     void database.query(
-      "UPDATE analysis_jobs SET updated_at = NOW() WHERE id = $1 AND status = 'processing'",
-      [job.id],
+      "UPDATE analysis_jobs SET updated_at = NOW() WHERE id = $1 AND status = 'processing' AND claim_token = $2",
+      [job.id, job.claim_token],
     ).catch((error) => console.error("Analysis job heartbeat failed", error));
   }, 30_000);
   try {
@@ -77,11 +78,12 @@ async function processClaimedJob(database: Database, config: AppConfig, job: Cla
       `UPDATE analysis_jobs
        SET status = 'complete', result = $2, model_version = $3,
            provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'processing' AND claim_token = $4`,
       [
         job.id,
         JSON.stringify(result),
         `${config.models.transcription}+${config.models.extraction}+${job.input.model ?? config.models.curation}`,
+        job.claim_token,
       ],
     );
   } catch (error) {
@@ -104,7 +106,7 @@ async function deleteExpiredJobs(database: Database, retentionDays: number): Pro
 async function requeueStaleJobs(database: Database): Promise<void> {
   await database.query(
     `UPDATE analysis_jobs
-     SET status = 'queued', updated_at = NOW()
+     SET status = 'queued', claim_token = NULL, updated_at = NOW()
      WHERE status = 'processing' AND updated_at < NOW() - INTERVAL '3 minutes'`,
   );
 }
@@ -119,20 +121,21 @@ async function claimNextJob(database: Database): Promise<ClaimedJob | undefined>
        LIMIT 1
      )
      UPDATE analysis_jobs AS jobs
-     SET status = 'processing', updated_at = NOW()
+     SET status = 'processing', claim_token = gen_random_uuid(), updated_at = NOW()
      FROM next_job
      WHERE jobs.id = next_job.id
-     RETURNING jobs.id, jobs.user_id, jobs.input, jobs.credit_cost, jobs.provider_credential_encrypted`,
+     RETURNING jobs.id, jobs.user_id, jobs.input, jobs.credit_cost, jobs.provider_credential_encrypted, jobs.claim_token`,
   );
   return result.rows[0];
 }
 
 async function refundFailedJob(database: Database, job: ClaimedJob, message: string): Promise<void> {
   await withTransaction(database, async (client) => {
-    await client.query(
-      "UPDATE analysis_jobs SET status = 'failed', error = $2, provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW() WHERE id = $1",
-      [job.id, message],
+    const failed = await client.query(
+      "UPDATE analysis_jobs SET status = 'failed', error = $2, provider_credential_encrypted = NULL, updated_at = NOW(), completed_at = NOW() WHERE id = $1 AND status = 'processing' AND claim_token = $3",
+      [job.id, message, job.claim_token],
     );
+    if (failed.rowCount !== 1) return;
     if (job.credit_cost <= 0) return;
     await client.query(
       `INSERT INTO credit_ledger(user_id, delta, reason, reference, metadata)

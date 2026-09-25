@@ -656,14 +656,30 @@ struct PromptEditorView: View {
             let preferredTranscript = sourceChanged && editedTranscript == oldTranscript
                 ? nil
                 : (editedTranscript.isEmpty ? nil : editedTranscript)
+            let transcriptChanged = !sourceChanged && editedTranscript != oldTranscript
+            let promptCountMatches = promptCountMode == .automatic
+                || episodeStore.episode.prompts.count == selectedPromptCount
+            let editedTitle = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let preferredTitle = imported.feedURL == nil && !editedTitle.isEmpty
+                ? editedTitle
+                : (!sourceChanged && !editedTitle.isEmpty && editedTitle != episodeStore.episode.title
+                    ? editedTitle
+                    : nil)
 
-            applyImportedMetadata(imported, sourceURL: inputURL, preferredTranscript: preferredTranscript)
+            applyImportedMetadata(
+                imported,
+                sourceURL: inputURL,
+                preferredTitle: preferredTitle,
+                preferredTranscript: preferredTranscript
+            )
             isResolving = false
             guard hasUsableAI else {
                 importStatusText = "Episode details saved. Connect your AI when you are ready to create a transcript and prompts."
                 return
             }
             let alreadyPrepared = !sourceChanged
+                && !transcriptChanged
+                && promptCountMatches
                 && (preferredTranscript?.split(whereSeparator: { $0.isWhitespace }).count ?? 0) >= 120
                 && episodeStore.episode.prompts.count >= requiredPromptCount(
                     duration: imported.durationSeconds ?? estimateDurationFromTranscript(preferredTranscript ?? "")
@@ -680,7 +696,11 @@ struct PromptEditorView: View {
             importStatusText = "Episode saved. Analyzing the complete podcast..."
             isPreparingTranscript = true
             if CloudAnalysisClient.isConfigured {
-                await prepareCloudEpisode(imported, preferredTranscript: preferredTranscript)
+                await prepareCloudEpisode(
+                    imported,
+                    preferredTranscript: preferredTranscript,
+                    forceRefresh: !sourceChanged
+                )
             } else {
                 await prepareCompleteEpisode(imported, preferredTranscript: preferredTranscript)
             }
@@ -697,7 +717,8 @@ struct PromptEditorView: View {
     @MainActor
     private func prepareCloudEpisode(
         _ imported: PodcastImportResult,
-        preferredTranscript: String?
+        preferredTranscript: String?,
+        forceRefresh: Bool
     ) async {
         defer { isPreparingTranscript = false }
         do {
@@ -713,6 +734,7 @@ struct PromptEditorView: View {
                 promptCount: count,
                 model: AIAccountStore.selectedModelID(),
                 providerAPIKey: providerKey,
+                forceRefresh: forceRefresh,
                 progress: { status in
                     Task { @MainActor in self.importStatusText = status }
                 }
@@ -766,14 +788,10 @@ struct PromptEditorView: View {
     private func applyImportedMetadata(
         _ imported: PodcastImportResult,
         sourceURL: URL,
+        preferredTitle: String?,
         preferredTranscript: String?
     ) {
-        let importedTitle: String
-        if imported.feedURL == nil, !titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            importedTitle = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            importedTitle = imported.title
-        }
+        let importedTitle = preferredTitle ?? imported.title
         let initialSummary = imported.publisherSummary
             ?? (imported.audioURL == episodeStore.episode.audioURL ? episodeStore.episode.summary : nil)
 

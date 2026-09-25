@@ -30,8 +30,15 @@ function prompt(overrides: Partial<EpisodePrompt> = {}): EpisodePrompt {
 describe("prompt quality gates", () => {
   it("waits until the supporting passage ends, even when it starts at zero", () => {
     const [result] = validateAndRankPrompts([prompt()], transcript, 120);
-    expect(result!.time).toBeGreaterThan(40);
-    expect(result!.time).toBeLessThanOrEqual(120);
+    expect(result!.time).toBe(53);
+  });
+
+  it("uses the supplied evidence time when the same words occur earlier", () => {
+    const repeatedTranscript = `${evidence} Some unrelated discussion. ${evidence}`;
+    const [result] = validateAndRankPrompts([
+      prompt({ evidence: [{ quote: evidence, start_seconds: 88, end_seconds: 104 }] }),
+    ], repeatedTranscript, 120);
+    expect(result!.time).toBe(107);
   });
 
   it("rejects a fabricated second passage even when the first is real", () => {
