@@ -158,6 +158,14 @@ struct CloudAnalysisClient {
         )
     }
 
+    func cancel(jobID: UUID) async throws {
+        _ = try await authorizedRequest(path: "v1/episode-jobs/\(jobID.uuidString)/cancel", method: "POST")
+    }
+
+    func acknowledge(jobID: UUID) async throws {
+        _ = try await authorizedRequest(path: "v1/episode-jobs/\(jobID.uuidString)/acknowledge", method: "POST")
+    }
+
     private func waitForCompletion(
         _ pending: PendingCloudAnalysis,
         progress: @escaping (String) -> Void
@@ -295,8 +303,10 @@ struct CloudAnalysisClient {
     }
 
     static func acknowledgeSavedAnalysis(jobID: UUID?) {
-        guard let jobID, pendingAnalysis?.jobID == jobID else { return }
-        clearPending()
+        guard let jobID else { return }
+        if pendingAnalysis?.jobID == jobID { clearPending() }
+        // A failed acknowledgement leaves the server result retained, never deleted early.
+        Task { try? await CloudAnalysisClient().acknowledge(jobID: jobID) }
     }
 
     private func serviceMessage(from data: Data, response: HTTPURLResponse? = nil) -> String? {

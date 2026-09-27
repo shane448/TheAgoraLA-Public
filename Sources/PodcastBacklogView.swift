@@ -120,6 +120,7 @@ private final class PodcastBacklogStore: ObservableObject {
     @Published private(set) var isUsingDirectFallback = false
     @Published private(set) var cloudUnavailable = false
     @Published var notice = ""
+    @Published private(set) var storageError: String?
 
     private static var storageURL: URL? {
         guard let applicationSupport = FileManager.default.urls(
@@ -503,7 +504,15 @@ private final class PodcastBacklogStore: ObservableObject {
                     guard let analysis = snapshot.analysis else {
                         throw CloudAnalysisError.invalidResponse
                     }
-                    try validateAutomaticAnalysis(analysis)
+                    do {
+                        try validateAutomaticAnalysis(analysis)
+                    } catch {
+                        update(id) {
+                            $0.status = .failed
+                            $0.errorMessage = "The analysis did not produce enough well-distributed questions. Tap Retry to generate a fresh analysis."
+                        }
+                        continue
+                    }
                     let completed = Episode(
                         id: item.episodeID,
                         title: item.displayTitle,
@@ -517,15 +526,30 @@ private final class PodcastBacklogStore: ObservableObject {
                         durationSeconds: analysis.duration,
                         artworkURL: item.artworkURL
                     )
-                    try episodeStore.saveEpisode(completed)
+                    try await episodeStore.saveEpisode(completed)
                     await PodcastTranscriptCheckpoint.remove(for: item.episodeID)
                     update(id) {
                         $0.status = .complete
                         $0.durationSeconds = analysis.duration
                         $0.errorMessage = nil
                     }
+                    CloudAnalysisClient.acknowledgeSavedAnalysis(jobID: jobID)
                 }
             } catch {
+                if case CloudAnalysisError.invalidResponse = error {
+                    update(id) {
+                        $0.status = .failed
+                        $0.errorMessage = "The cloud returned an incomplete analysis. Tap Retry to generate a fresh analysis."
+                    }
+                    continue
+                }
+                if error is DecodingError {
+                    update(id) {
+                        $0.status = .failed
+                        $0.errorMessage = "The cloud returned an unreadable analysis. Tap Retry to generate a fresh analysis."
+                    }
+                    continue
+                }
                 if let urlError = error as? URLError,
                    [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains(urlError.code) {
                     continue
@@ -548,13 +572,15 @@ private final class PodcastBacklogStore: ObservableObject {
                     continue
                 }
                 update(id) {
-                    $0.errorMessage = "Status will refresh when the cloud is reachable. \(message)"
+                    $0.errorMessage = episodeStore.saveError
+                        ?? "Status will refresh when the cloud is reachable. \(message)"
                 }
             }
         }
     }
 
     func retry(_ id: UUID) {
+        if item(with: id)?.jobID != nil { forceRefreshIDs.insert(id) }
         update(id) {
             $0.status = .waiting
             $0.jobID = nil
@@ -582,7 +608,15 @@ private final class PodcastBacklogStore: ObservableObject {
         await PodcastTranscriptCheckpoint.remove(for: episodeID)
     }
 
-    func remove(_ id: UUID) {
+    func remove(_ id: UUID) async {
+        if let item = item(with: id), item.status.isActive, let jobID = item.jobID {
+            do {
+                try await CloudAnalysisClient().cancel(jobID: jobID)
+            } catch {
+                notice = "Could not cancel cloud preparation. The episode is still in your backlog. Please try again when connected."
+                return
+            }
+        }
         let episodeID = item(with: id)?.episodeID
         items.removeAll { $0.id == id }
         persist()
@@ -635,7 +669,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 promptCount: nil,
                 model: AIAccountStore.selectedModelID(),
                 providerAPIKey: providerKey,
-                forceRefresh: forceRefreshIDs.contains(id)
+                forceRefresh: forceRefreshIDs.contains(id) || (original.status == .failed && original.jobID != nil)
             )
             forceRefreshIDs.remove(id)
             update(id) {
@@ -752,7 +786,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 durationSeconds: analysis.duration,
                 artworkURL: imported.artworkURL
             )
-            try episodeStore.saveEpisode(completedEpisode)
+            try await episodeStore.saveEpisode(completedEpisode)
             forceRefreshIDs.remove(id)
             await PodcastTranscriptCheckpoint.remove(for: original.episodeID)
             update(id) {
@@ -802,9 +836,16 @@ private final class PodcastBacklogStore: ObservableObject {
         }
     }
 
-    private func persist() {
-        guard let url = Self.storageURL, let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: url, options: .atomic)
+    func persist() {
+        do {
+            guard let url = Self.storageURL else {
+                throw CloudAnalysisError.service("Backlog storage is unavailable.")
+            }
+            try JSONEncoder().encode(items).write(to: url, options: .atomic)
+            storageError = nil
+        } catch {
+            storageError = "Your latest backlog changes have not been saved. Keep Agora open, check available device storage, then retry."
+        }
     }
 
     private func normalizedURL(_ url: URL) -> String {
@@ -846,6 +887,13 @@ struct PodcastBacklogView: View {
                     introductionCard
                     addLinksCard
                     backlogControls
+                    if let error = backlog.storageError {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(error).foregroundColor(AgoraTheme.ink)
+                            Button("Retry Save") { backlog.persist() }
+                                .buttonStyle(AgoraOutlineButtonStyle())
+                        }
+                    }
 
                     if backlog.items.isEmpty {
                         emptyCard
@@ -876,7 +924,7 @@ struct PodcastBacklogView: View {
                                             await episodeStore.loadLibraryIfNeeded()
                                             episodeStore.deleteSavedEpisode(id: item.episodeID)
                                         }
-                                        backlog.remove(item.id)
+                                        await backlog.remove(item.id)
                                     }
                                 }
                             )
@@ -1262,12 +1310,19 @@ private struct PodcastBacklogRow: View {
                             .buttonStyle(AgoraOutlineButtonStyle())
                     }
                     Spacer()
-                    if !item.status.isActive && !isSelected {
+                    if !isSelected {
                         Button(role: .destructive, action: onRemove) {
-                            Label("Remove", systemImage: "trash")
+                            Label(item.status.isActive ? "Cancel & Remove" : "Remove", systemImage: "trash")
                         }
+                        .disabled(item.status.isActive && item.jobID == nil)
                         .font(AgoraTheme.buttonFont)
                     }
+                }
+
+                if item.status.isActive, item.jobID != nil {
+                    Text("Cancel stops further cloud work. AI usage already processed may still be charged by your provider.")
+                        .font(AgoraTheme.tagFont)
+                        .foregroundColor(AgoraTheme.inkMuted)
                 }
 
                 if item.status == .complete {

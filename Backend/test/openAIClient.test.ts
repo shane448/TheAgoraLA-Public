@@ -25,6 +25,22 @@ describe("AgoraOpenAI transcription", () => {
     expect(mocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({
       model: "openai/gpt-4o-mini-transcribe",
       response_format: "json",
-    }));
+    }), { signal: undefined });
+  });
+
+  it("does not start another billed request after cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const client = new AgoraOpenAI({ models: { transcription: "test" } } as AppConfig, "test-key", undefined, controller.signal);
+    await expect(client.transcribe("/dev/null")).rejects.toThrow();
+    expect(mocks.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("passes cancellation to an in-flight provider request", async () => {
+    const controller = new AbortController();
+    mocks.transcribe.mockResolvedValue({ text: "Transcript" });
+    const client = new AgoraOpenAI({ models: { transcription: "test" } } as AppConfig, "test-key", undefined, controller.signal);
+    await client.transcribe("/dev/null");
+    expect(mocks.transcribe.mock.calls[0]?.[1]).toEqual({ signal: controller.signal });
   });
 });

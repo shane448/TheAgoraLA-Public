@@ -5,7 +5,7 @@ import type { AppConfig } from "./config.js";
 export class AgoraOpenAI {
   private readonly client: OpenAI;
 
-  constructor(private readonly config: AppConfig, apiKey: string, baseURL?: string) {
+  constructor(private readonly config: AppConfig, apiKey: string, baseURL?: string, private readonly signal?: AbortSignal) {
     this.client = new OpenAI({ apiKey, baseURL });
   }
 
@@ -18,6 +18,7 @@ export class AgoraOpenAI {
     safetyID: string;
     effort?: "low" | "medium" | "high";
   }): Promise<T> {
+    this.signal?.throwIfAborted();
     const response = await this.client.responses.create({
       model: options.model,
       instructions: options.instructions,
@@ -34,18 +35,19 @@ export class AgoraOpenAI {
       },
       safety_identifier: options.safetyID,
       store: false,
-    });
+    }, { signal: this.signal });
     const content = response.output_text.trim();
     if (!content) throw new Error("OpenAI returned an empty structured response.");
     return JSON.parse(content) as T;
   }
 
   async transcribe(filePath: string): Promise<string> {
+    this.signal?.throwIfAborted();
     const result = await this.client.audio.transcriptions.create({
       file: createReadStream(filePath),
       model: this.config.models.transcription,
       response_format: "json",
-    });
+    }, { signal: this.signal });
     const text = typeof result === "string" ? result : String((result as { text?: string }).text ?? "");
     return text.trim();
   }

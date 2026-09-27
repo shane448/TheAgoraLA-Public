@@ -292,7 +292,11 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
           [session.userID, sourceHash],
         );
         existingJob = existing.rows[0];
-        if (existingJob) return;
+        if (existingJob) {
+          // A fresh consumer must save this result before its retention clock starts.
+          await client.query("UPDATE analysis_jobs SET acknowledged_at = NULL WHERE id = $1", [existingJob.id]);
+          return;
+        }
         await client.query(
           `INSERT INTO analysis_jobs(
              id, user_id, source_hash, status, input, credit_cost, provider_credential_encrypted
@@ -309,6 +313,35 @@ export function buildApp(options: { config: AppConfig; database: Database }) {
       return existingJob.status === "complete" ? response : reply.code(202).send(response);
     }
     return reply.code(202).send({ id: jobID, status: "queued", cached: false });
+  });
+
+  app.post("/v1/episode-jobs/:id/acknowledge", async (request, reply) => {
+    const session = await requireSession(request.headers.authorization, config);
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const result = await database.query(
+      `UPDATE analysis_jobs SET acknowledged_at = COALESCE(acknowledged_at, NOW())
+       WHERE id = $1 AND user_id = $2 AND status = 'complete' RETURNING id`,
+      [id, session.userID],
+    );
+    if (!result.rows[0]) return reply.code(404).send({ error: "Completed analysis job not found." });
+    return { saved: true };
+  });
+
+  app.post("/v1/episode-jobs/:id/cancel", async (request, reply) => {
+    const session = await requireSession(request.headers.authorization, config);
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const result = await database.query(
+      `UPDATE analysis_jobs SET status = 'failed', error = 'Canceled by you.',
+       provider_credential_encrypted = NULL, claim_token = NULL,
+       completed_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND status IN ('queued', 'processing') RETURNING id`,
+      [id, session.userID],
+    );
+    if (!result.rows[0]) {
+      const existing = await database.query("SELECT id FROM analysis_jobs WHERE id = $1 AND user_id = $2", [id, session.userID]);
+      if (!existing.rows[0]) return reply.code(404).send({ error: "Analysis job not found." });
+    }
+    return { canceled: true };
   });
 
   app.get("/v1/episode-jobs/:id", async (request, reply) => {

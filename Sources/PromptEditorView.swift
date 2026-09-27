@@ -739,7 +739,7 @@ struct PromptEditorView: View {
                     Task { @MainActor in self.importStatusText = status }
                 }
             )
-            try applyAnalysis(analysis, expectedAudioURL: expectedURL)
+            try await applyAnalysis(analysis, expectedAudioURL: expectedURL)
             CloudAnalysisClient.acknowledgeSavedAnalysis(jobID: completedJobID)
             selectedPromptCount = analysis.recommendedPromptCount
             importStatusText = "Episode brief, full transcript, and \(analysis.prompts.count) prompts are ready."
@@ -774,7 +774,7 @@ struct PromptEditorView: View {
                 guard let (analysis, expectedURL, completedJobID) = try await CloudAnalysisClient().resumePending(progress: { status in
                     Task { @MainActor in self.importStatusText = status }
                 }) else { return }
-                try applyAnalysis(analysis, expectedAudioURL: expectedURL)
+                try await applyAnalysis(analysis, expectedAudioURL: expectedURL)
                 CloudAnalysisClient.acknowledgeSavedAnalysis(jobID: completedJobID)
                 selectedPromptCount = analysis.recommendedPromptCount
                 importStatusText = "Your cloud analysis is complete and ready."
@@ -875,7 +875,7 @@ struct PromptEditorView: View {
                     }
                 }
             )
-            try applyAnalysis(analysis, expectedAudioURL: imported.audioURL)
+            try await applyAnalysis(analysis, expectedAudioURL: imported.audioURL)
             if promptCountMode == .automatic {
                 selectedPromptCount = analysis.recommendedPromptCount
             }
@@ -906,13 +906,13 @@ struct PromptEditorView: View {
     }
 
     @MainActor
-    private func applyAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) throws {
+    private func applyAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) async throws {
         let requiredCount = requiredPromptCount(duration: analysis.duration)
         guard analysis.prompts.count >= requiredCount,
               PodcastPromptPolicy.hasAdequateCoverage(analysis.prompts, duration: analysis.duration) else {
             throw AIServiceError.noQualityPrompts
         }
-        try episodeStore.saveAnalysis(analysis, expectedAudioURL: expectedAudioURL)
+        try await episodeStore.saveAnalysis(analysis, expectedAudioURL: expectedAudioURL)
         transcriptText = analysis.transcript
         summaryText = analysis.summary
         if analysis.duration.isFinite, analysis.duration > 10 {

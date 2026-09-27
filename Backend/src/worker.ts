@@ -64,15 +64,18 @@ export function startAnalysisWorker(database: Database, config: AppConfig) {
 }
 
 async function processClaimedJob(database: Database, config: AppConfig, job: ClaimedJob): Promise<void> {
+  const controller = new AbortController();
   const heartbeat = setInterval(() => {
     void database.query(
       "UPDATE analysis_jobs SET updated_at = NOW() WHERE id = $1 AND status = 'processing' AND claim_token = $2",
       [job.id, job.claim_token],
-    ).catch((error) => console.error("Analysis job heartbeat failed", error));
-  }, 30_000);
+    ).then((result) => {
+      if (result.rowCount === 0) controller.abort();
+    }).catch((error) => console.error("Analysis job heartbeat failed", error));
+  }, 2_000);
   try {
     const providerKey = decryptProviderCredential(job.provider_credential_encrypted, config);
-    const openAI = new AgoraOpenAI(config, providerKey, "https://openrouter.ai/api/v1");
+    const openAI = new AgoraOpenAI(config, providerKey, "https://openrouter.ai/api/v1", controller.signal);
     const result = await processEpisodeAnalysis({ input: job.input, userID: job.user_id, openAI, config });
     await database.query(
       `UPDATE analysis_jobs
@@ -94,11 +97,11 @@ async function processClaimedJob(database: Database, config: AppConfig, job: Cla
   }
 }
 
-async function deleteExpiredJobs(database: Database, retentionDays: number): Promise<void> {
+export async function deleteExpiredJobs(database: Database, retentionDays: number): Promise<void> {
   await database.query(
     `DELETE FROM analysis_jobs
-     WHERE completed_at IS NOT NULL
-       AND completed_at < NOW() - make_interval(days => $1)`,
+     WHERE (status = 'failed' AND completed_at < NOW() - make_interval(days => $1))
+        OR (status = 'complete' AND acknowledged_at < NOW() - make_interval(days => $1))`,
     [retentionDays],
   );
 }

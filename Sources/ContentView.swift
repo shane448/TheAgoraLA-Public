@@ -42,6 +42,15 @@ struct ContentView: View {
                 }
             }
             .navigationBarHidden(true)
+            .alert("Changes Need Saving", isPresented: Binding(
+                get: { episodeStore.saveError != nil },
+                set: { if !$0 { episodeStore.saveError = nil } }
+            )) {
+                Button("Retry Save") { episodeStore.retrySaving() }
+                Button("Keep Editing", role: .cancel) { }
+            } message: {
+                Text(episodeStore.saveError ?? "Please retry saving your changes.")
+            }
             .sheet(isPresented: $showEditor) {
                 ScrollView {
                     PromptEditorView(episodeStore: episodeStore)

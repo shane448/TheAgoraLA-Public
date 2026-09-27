@@ -5,6 +5,9 @@ final class EpisodeStore: ObservableObject {
     @Published var episode: Episode
     @Published private(set) var savedEpisodes: [Episode]
     @Published private(set) var isLibraryLoaded = false
+    @Published var saveError: String?
+    private static let storageQueue = DispatchQueue(label: "Agora.episodeStorage", qos: .utility)
+    private var saveRevision = 0
 
     private let storageKey = "TheAgoraLA.Episode.Data"
     private static let retiredDemoID = UUID(uuidString: "A60DD4CF-8B21-4A03-9D36-E43EC6C351AE")!
@@ -286,7 +289,7 @@ final class EpisodeStore: ObservableObject {
         persist()
     }
 
-    func saveAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) throws {
+    func saveAnalysis(_ analysis: EpisodeAnalysisResult, expectedAudioURL: URL) async throws {
         guard episode.audioURL == expectedAudioURL else {
             throw CloudAnalysisError.service("This analysis belongs to a different episode. Your current podcast has not been changed.")
         }
@@ -303,14 +306,9 @@ final class EpisodeStore: ObservableObject {
             durationSeconds: analysis.duration,
             artworkURL: episode.artworkURL
         )
-        guard let url = Self.storageURL else {
-            throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
-        }
-        let data = try JSONEncoder().encode(updated)
-        try data.write(to: url, options: .atomic)
         episode = updated
         syncActiveEpisodeIntoLibrary()
-        persistLibrary()
+        try await persistAndWait()
     }
 
     func updateDuration(_ duration: Double) {
@@ -332,7 +330,8 @@ final class EpisodeStore: ObservableObject {
         persist()
     }
 
-    func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) throws {
+    func saveEpisode(_ savedEpisode: Episode, makeActive: Bool = false) async throws {
+        await loadLibraryIfNeeded()
         let replacesActiveEpisode = savedEpisode.id == episode.id
         var updatedLibrary = savedEpisodes
         if let index = updatedLibrary.firstIndex(where: { $0.id == savedEpisode.id }) {
@@ -340,17 +339,11 @@ final class EpisodeStore: ObservableObject {
         } else {
             updatedLibrary.insert(savedEpisode, at: 0)
         }
-        if isLibraryLoaded, let libraryURL = Self.libraryStorageURL {
-            try JSONEncoder().encode(updatedLibrary).write(to: libraryURL, options: .atomic)
-        }
         if makeActive || replacesActiveEpisode {
-            guard let storageURL = Self.storageURL else {
-                throw CloudAnalysisError.service("Episode storage is unavailable. Please try saving again.")
-            }
-            try JSONEncoder().encode(savedEpisode).write(to: storageURL, options: .atomic)
             episode = savedEpisode
         }
         savedEpisodes = updatedLibrary
+        try await persistAndWait()
     }
 
     @discardableResult
@@ -368,8 +361,6 @@ final class EpisodeStore: ObservableObject {
     }
 
     private func persist() {
-        guard let url = Self.storageURL, let data = try? JSONEncoder().encode(episode) else { return }
-        try? data.write(to: url, options: .atomic)
         syncActiveEpisodeIntoLibrary()
         persistLibrary()
     }
@@ -397,10 +388,52 @@ final class EpisodeStore: ObservableObject {
     }
 
     private func persistLibrary() {
-        guard isLibraryLoaded,
-              let url = Self.libraryStorageURL,
-              let data = try? JSONEncoder().encode(savedEpisodes) else { return }
-        try? data.write(to: url, options: .atomic)
+        enqueueSave { _ in }
+    }
+
+    func retrySaving() {
+        persist()
+    }
+
+    private func persistAndWait() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            enqueueSave { result in continuation.resume(with: result) }
+        }
+    }
+
+    // Capture immutable snapshots on the main actor; serialize disk writes so an
+    // older save can never overwrite a newer edit or episode selection.
+    private func enqueueSave(completion: @escaping (Result<Void, Error>) -> Void) {
+        saveRevision += 1
+        let revision = saveRevision
+        let current = episode
+        let library = isLibraryLoaded ? savedEpisodes : nil
+        let currentURL = Self.storageURL
+        let libraryURL = Self.libraryStorageURL
+        Self.storageQueue.async {
+            let result = Result<Void, Error> {
+                guard let currentURL else {
+                    throw CloudAnalysisError.service("Episode storage is unavailable.")
+                }
+                try JSONEncoder().encode(current).write(to: currentURL, options: .atomic)
+                if let library {
+                    guard let libraryURL else {
+                        throw CloudAnalysisError.service("Library storage is unavailable.")
+                    }
+                    try JSONEncoder().encode(library).write(to: libraryURL, options: .atomic)
+                }
+            }
+            Task { @MainActor [weak self] in
+                if let self, self.saveRevision == revision {
+                    switch result {
+                    case .success: self.saveError = nil
+                    case .failure:
+                        self.saveError = "Your latest changes could not be saved. They are still open in Agora. Free some device storage if needed, then tap Retry Save before closing the app."
+                    }
+                }
+                completion(result)
+            }
+        }
     }
 
     private func normalizedIdentifier(_ value: String?) -> String? {
