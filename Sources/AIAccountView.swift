@@ -4,13 +4,11 @@ import UIKit
 
 private enum AISetupStage: Int, CaseIterable {
     case connect = 1
-    case quality = 2
-    case complete = 3
+    case complete = 2
 
     var shortTitle: String {
         switch self {
         case .connect: return "Connect"
-        case .quality: return "Quality"
         case .complete: return "Ready"
         }
     }
@@ -45,8 +43,6 @@ struct AIAccountView: View {
                         switch stage {
                         case .connect:
                             connectionCard
-                        case .quality:
-                            qualityCard
                         case .complete:
                             completionCard
                         }
@@ -106,7 +102,7 @@ struct AIAccountView: View {
         AgoraCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Step \(stage.rawValue) of 3")
+                    Text("Step \(stage.rawValue) of \(AISetupStage.allCases.count)")
                         .font(AgoraTheme.tagFont.weight(.bold))
                         .foregroundColor(AgoraTheme.accent)
                     Spacer()
@@ -146,7 +142,7 @@ struct AIAccountView: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("AI setup, step \(stage.rawValue) of 3: \(stage.shortTitle)")
+                .accessibilityLabel("AI setup, step \(stage.rawValue) of \(AISetupStage.allCases.count): \(stage.shortTitle)")
             }
         }
     }
@@ -175,7 +171,7 @@ struct AIAccountView: View {
                 SetupInstructionRow(
                     number: 3,
                     title: "Return automatically",
-                    detail: "After approval, this screen advances to analysis quality."
+                    detail: "After approval, this screen confirms your AI is ready."
                 )
 
                 if isConnectingProvider {
@@ -299,44 +295,6 @@ struct AIAccountView: View {
         .cornerRadius(14)
     }
 
-    private var qualityCard: some View {
-        AgoraCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("Account Connected", systemImage: "checkmark.shield.fill")
-                    .font(AgoraTheme.tagFont.weight(.bold))
-                    .foregroundColor(AgoraTheme.accent)
-
-                Text("Choose Analysis Quality")
-                    .font(AgoraTheme.cardValueFont)
-                    .foregroundColor(AgoraTheme.ink)
-
-                Text("Balanced is recommended for most listeners. You can change this later from AI Setup.")
-                    .font(AgoraTheme.bodyFont)
-                    .foregroundColor(AgoraTheme.inkMuted)
-
-                ForEach(AIPowerLevel.allCases) { level in
-                    qualityOption(level)
-                }
-
-                Button("Continue with \(providerAccount.powerLevel.title)") {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        stage = .complete
-                    }
-                }
-                .buttonStyle(AgoraPillButtonStyle())
-
-                Button("Disconnect and Start Over", role: .destructive) {
-                    providerAccount.disconnect()
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        stage = .connect
-                    }
-                }
-                .font(AgoraTheme.tagFont.weight(.semibold))
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
     private var completionCard: some View {
         AgoraCard {
             VStack(alignment: .leading, spacing: 16) {
@@ -355,7 +313,7 @@ struct AIAccountView: View {
                 }
 
                 SetupCheckRow(text: "Secure provider account connected")
-                SetupCheckRow(text: "\(providerAccount.powerLevel.title) analysis selected")
+                SetupCheckRow(text: "Claude Opus writes questions; Claude Haiku handles the rest")
                 SetupCheckRow(text: "Provider billing stays separate from The Agora")
 
                 Text("Before analyzing a long episode, make sure your provider account has available credits. You can return here anytime.")
@@ -367,15 +325,7 @@ struct AIAccountView: View {
                 }
                 .buttonStyle(AgoraPillButtonStyle())
 
-                HStack {
-                    Button("Change Quality") {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            stage = .quality
-                        }
-                    }
-                    Spacer()
-                    Link("Provider Credits", destination: AppLinks.providerCredits)
-                }
+                Link("Provider Credits", destination: AppLinks.providerCredits)
                 .font(AgoraTheme.tagFont.weight(.semibold))
                 .tint(AgoraTheme.accent)
 
@@ -427,45 +377,6 @@ struct AIAccountView: View {
         item.rawValue <= stage.rawValue ? AgoraTheme.accent : Color.white.opacity(0.75)
     }
 
-    private func qualityOption(_ level: AIPowerLevel) -> some View {
-        Button {
-            providerAccount.powerLevel = level
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: providerAccount.powerLevel == level ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(AgoraTheme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(level.title)
-                            .font(AgoraTheme.bodyFont.weight(.semibold))
-                            .foregroundColor(AgoraTheme.ink)
-                        if level == .balanced {
-                            Text("RECOMMENDED")
-                                .font(AgoraTheme.tagFont.weight(.bold))
-                                .foregroundColor(AgoraTheme.accent)
-                        }
-                    }
-                    Text(level.detail)
-                        .font(AgoraTheme.tagFont)
-                        .foregroundColor(AgoraTheme.inkMuted)
-                }
-                Spacer()
-            }
-            .padding(12)
-            .background(providerAccount.powerLevel == level ? AgoraTheme.accent.opacity(0.1) : Color.white.opacity(0.65))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(providerAccount.powerLevel == level ? AgoraTheme.accent : AgoraTheme.cardStroke, lineWidth: 1)
-            )
-            .cornerRadius(14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(level.title), \(level.detail)\(level == .balanced ? ", recommended" : "")")
-        .accessibilityAddTraits(providerAccount.powerLevel == level ? .isSelected : [])
-    }
-
     @MainActor
     private func connectProvider() async {
         guard providerAccount.allowsAIProcessing else {
@@ -479,7 +390,7 @@ struct AIAccountView: View {
         do {
             try await providerAccount.connect()
             withAnimation(.easeInOut(duration: 0.25)) {
-                stage = .quality
+                stage = .complete
             }
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             return
@@ -510,7 +421,7 @@ struct AIAccountView: View {
             try await providerAccount.connect(usingAPIKey: apiKey)
             apiKey = ""
             withAnimation(.easeInOut(duration: 0.25)) {
-                stage = .quality
+                stage = .complete
             }
         } catch let error as URLError {
             errorMessage = error.code == .notConnectedToInternet

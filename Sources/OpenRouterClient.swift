@@ -222,7 +222,7 @@ final class OpenRouterClient: @unchecked Sendable {
             maxTokens: 3_500,
             reasoningEffort: "low",
             timeoutInterval: 120,
-            modelID: "openai/gpt-4.1-mini"
+            modelID: AIModels.standard
         )
         guard let envelope = try? JSONDecoder().decode(ExtractedIdeaEnvelope.self, from: data) else {
             throw OpenRouterClientError.invalidResponse
@@ -314,7 +314,8 @@ final class OpenRouterClient: @unchecked Sendable {
             """,
             schema: schema,
             maxTokens: min(16_000, 2_500 + candidateCount * 750),
-            reasoningEffort: "high"
+            reasoningEffort: "high",
+            modelID: AIModels.questionWriting
         )
     }
 
@@ -368,7 +369,8 @@ final class OpenRouterClient: @unchecked Sendable {
             user: user,
             schema: schema,
             maxTokens: 6_000,
-            reasoningEffort: "high"
+            reasoningEffort: "high",
+            modelID: AIModels.questionWriting
         )
         guard let plan = try? JSONDecoder().decode(EpisodeLearningPlan.self, from: data),
               !plan.priorities.isEmpty else {
@@ -457,7 +459,8 @@ final class OpenRouterClient: @unchecked Sendable {
             user: user,
             schema: schema,
             maxTokens: min(18_000, count * 900),
-            reasoningEffort: "high"
+            reasoningEffort: "high",
+            modelID: AIModels.questionWriting
         )
     }
 
@@ -482,7 +485,8 @@ final class OpenRouterClient: @unchecked Sendable {
             system: system,
             user: user,
             schema: schema,
-            maxTokens: 900
+            maxTokens: 900,
+            modelID: AIModels.standard
         )
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let summary = object["summary"] as? String else {
@@ -542,7 +546,7 @@ final class OpenRouterClient: @unchecked Sendable {
                 maxTokens: analysisDepth.maxTokens,
                 reasoningEffort: analysisDepth.reasoningEffort,
                 timeoutInterval: analysisDepth.timeoutInterval,
-                modelID: "openai/gpt-4.1-mini"
+                modelID: AIModels.standard
             )
         } catch let error as OpenRouterClientError where error.canRetryGrading {
             data = try await structuredCompletion(
@@ -553,7 +557,7 @@ final class OpenRouterClient: @unchecked Sendable {
                 maxTokens: 700,
                 reasoningEffort: nil,
                 timeoutInterval: 35,
-                modelID: "openai/gpt-4.1-nano"
+                modelID: AIModels.standard
             )
         }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -733,11 +737,11 @@ final class OpenRouterClient: @unchecked Sendable {
         maxTokens: Int,
         reasoningEffort: String? = "medium",
         timeoutInterval: TimeInterval = 300,
-        modelID: String? = nil
+        modelID: String
     ) async throws -> Data {
         let key = try apiKey()
         var payload: [String: Any] = [
-            "model": modelID ?? AIAccountStore.selectedModelID(),
+            "model": modelID,
             "messages": [
                 ["role": "system", "content": system],
                 ["role": "user", "content": user],
@@ -745,11 +749,11 @@ final class OpenRouterClient: @unchecked Sendable {
             "max_tokens": maxTokens + reasoningAllowance(for: reasoningEffort),
             "response_format": [
                 "type": "json_schema",
-                "json_schema": ["name": name, "strict": true, "schema": schema],
+                "json_schema": ["name": name, "strict": true, "schema": modelID.hasPrefix("anthropic/") ? claudeCompatibleSchema(schema) : schema],
             ],
         ]
         if let reasoningEffort {
-            payload["reasoning"] = ["effort": reasoningEffort]
+            payload["reasoning"] = ["max_tokens": reasoningAllowance(for: reasoningEffort)]
         }
         var request = URLRequest(url: chatURL)
         request.httpMethod = "POST"
@@ -770,7 +774,9 @@ final class OpenRouterClient: @unchecked Sendable {
         return try jsonData(from: content)
     }
 
-    // Reasoning tokens count against max_tokens, so callers pass only the visible JSON budget.
+    // Reasoning tokens count against max_tokens, so callers pass only the visible JSON budget and
+    // the thinking budget is sent explicitly. An effort level alone would let OpenRouter give Claude
+    // up to 80% of max_tokens for thinking.
     private func reasoningAllowance(for effort: String?) -> Int {
         switch effort {
         case "high": return 24_000
@@ -778,6 +784,29 @@ final class OpenRouterClient: @unchecked Sendable {
         case "low": return 2_000
         default: return 0
         }
+    }
+
+    // Claude's strict structured outputs reject numeric ranges, string lengths, and array sizes
+    // beyond minItems 0 or 1, so those move into the description as instructions. The local quote,
+    // timing, and count checks still apply.
+    private func claudeCompatibleSchema(_ value: Any) -> Any {
+        if let array = value as? [Any] { return array.map(claudeCompatibleSchema) }
+        guard var object = value as? [String: Any] else { return value }
+        var limits: [String] = []
+        for key in ["minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"] {
+            guard let limit = object[key] else { continue }
+            if key == "minItems", let count = limit as? Int, count <= 1 { continue }
+            limits.append("\(key) \(limit)")
+            object.removeValue(forKey: key)
+        }
+        for (key, child) in object where key != "enum" {
+            object[key] = claudeCompatibleSchema(child)
+        }
+        if !limits.isEmpty {
+            let note = "Constraints: \(limits.joined(separator: ", "))."
+            object["description"] = [object["description"] as? String, note].compactMap { $0 }.joined(separator: " ")
+        }
+        return object
     }
 
     private func messageText(from message: [String: Any]) -> String? {

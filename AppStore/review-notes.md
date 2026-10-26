@@ -12,7 +12,7 @@ The current build does not contain an offline sample lesson or an account-free d
 
 1. Open AI Setup using the brain button. Read the disclosure and enable **Allow AI processing**.
 2. Select **I Already Have an API Key**, paste the confidential review key, and choose **Verify & Connect**.
-3. Leave the recommended analysis quality selected and return to the player.
+3. Review the readiness checklist and return to the player.
 4. Choose **Import a Podcast** and paste the exact public review-episode URL provided in the confidential review information. Choose **Import, Analyze & Save**.
 5. Wait for the cloud job or return to the app later. Long episodes can take several minutes.
 6. Play the episode or seek forward to a generated question's time. Enter a response and choose **Submit**. The score and feedback refer to that episode's supported answer.

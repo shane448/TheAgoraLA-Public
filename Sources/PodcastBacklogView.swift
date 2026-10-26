@@ -667,7 +667,7 @@ private final class PodcastBacklogStore: ObservableObject {
                 transcriptSource: imported.transcriptSource,
                 duration: duration,
                 promptCount: nil,
-                model: AIAccountStore.selectedModelID(),
+                model: AIModels.questionWriting,
                 providerAPIKey: providerKey,
                 forceRefresh: forceRefreshIDs.contains(id) || (original.status == .failed && original.jobID != nil)
             )

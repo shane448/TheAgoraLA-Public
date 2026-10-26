@@ -64,10 +64,6 @@ export default function SupportPage() {
           page returns to the app automatically.
         </li>
         <li>
-          Return automatically and choose an analysis quality. Balanced is
-          recommended for most listeners.
-        </li>
-        <li>
           Review the readiness checklist and choose <strong>Return to The Agora</strong>.
         </li>
       </ol>

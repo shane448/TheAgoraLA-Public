@@ -4,40 +4,9 @@ import Foundation
 import Security
 import UIKit
 
-enum AIPowerLevel: String, CaseIterable, Identifiable {
-    case balanced
-    case economical
-    case maximum
-    case free
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .balanced: return "Balanced"
-        case .economical: return "Economical"
-        case .maximum: return "Maximum quality"
-        case .free: return "Free model"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .balanced: return "Strong analysis with moderate cost"
-        case .economical: return "Fastest and lowest-cost option"
-        case .maximum: return "Deepest analysis at a higher cost"
-        case .free: return "Open model at no charge. Scanning and grading still cost a few cents, and free capacity is rate limited."
-        }
-    }
-
-    var modelID: String {
-        switch self {
-        case .balanced: return "openai/gpt-5.6-terra"
-        case .economical: return "openai/gpt-5.6-luna"
-        case .maximum: return "openai/gpt-6-astra"
-        case .free: return "nvidia/nemotron-3-super-120b-a12b:free"
-        }
-    }
+enum AIModels {
+    static let questionWriting = "anthropic/claude-opus-5.5"
+    static let standard = "anthropic/claude-haiku-5.5"
 }
 
 enum AIAccountError: LocalizedError {
@@ -78,18 +47,11 @@ final class AIAccountStore: NSObject, ObservableObject {
     @Published var allowsAIProcessing: Bool {
         didSet { AIProcessingConsent.setAllowed(allowsAIProcessing) }
     }
-    @Published var powerLevel: AIPowerLevel {
-        didSet { UserDefaults.standard.set(powerLevel.rawValue, forKey: Self.powerLevelKey) }
-    }
-
-    nonisolated private static let powerLevelKey = "TheAgoraLA.AI.PowerLevel"
     nonisolated private static let keychainService = "com.theagora.la.personal-ai"
     nonisolated private static let keychainAccount = "openrouter-oauth-key"
     private var webSession: ASWebAuthenticationSession?
 
     override init() {
-        let saved = UserDefaults.standard.string(forKey: Self.powerLevelKey)
-        powerLevel = AIPowerLevel(rawValue: saved ?? "") ?? .balanced
         allowsAIProcessing = Self.hasDataSharingConsent
         isConnected = Self.readAPIKey() != nil
         super.init()
@@ -210,11 +172,6 @@ final class AIAccountStore: NSObject, ObservableObject {
         SecItemUpdate(query as CFDictionary, [
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ] as CFDictionary)
-    }
-
-    nonisolated static func selectedModelID() -> String {
-        let saved = UserDefaults.standard.string(forKey: powerLevelKey)
-        return (AIPowerLevel(rawValue: saved ?? "") ?? .balanced).modelID
     }
 
     private func beginWebAuthentication(at url: URL) async throws -> URL {

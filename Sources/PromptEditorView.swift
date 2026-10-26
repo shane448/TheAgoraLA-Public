@@ -815,7 +815,7 @@ struct PromptEditorView: View {
                 transcriptSource: imported.transcriptSource,
                 duration: duration > 10 ? duration : nil,
                 promptCount: count,
-                model: AIAccountStore.selectedModelID(),
+                model: AIModels.questionWriting,
                 providerAPIKey: providerKey,
                 forceRefresh: forceRefresh,
                 progress: { status in

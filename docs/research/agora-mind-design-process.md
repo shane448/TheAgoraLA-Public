@@ -15,7 +15,7 @@ It builds on the Agora Lite plan in [`gcp-small-scale-testing.md`](gcp-small-sca
 | Question | Choice | Why |
 |---|---|---|
 | Separate app or the current one? | Rename the current app to Agora Mind. Keep "use your own OpenRouter account" as an advanced setting. | Apple can reject near-duplicate apps (guideline 4.3), and one app is half the upkeep. The own-account option lets heavy listeners keep going when the monthly budget runs out, and the server already accepts listener keys. |
-| Starting AI budget | A hard cap of $100 a month on small models. The board sets the ongoing budget after real costs are measured. | Claude Haiku 5.5 plus open-source transcription costs an estimated 5–6¢ per hour-long episode, so $100 covers roughly 1,500–2,000 episodes. Today's default model (gpt-5.6-terra) would cover about 150. |
+| AI budget and models | $60 in total for the app, with a hard cap of $30 on AI spending, set as the credit limit on the nonprofit's OpenRouter key. Claude Opus 5.5 writes and selects questions; Claude Haiku 5.5 does everything else. The board sets any ongoing budget after real costs are measured. | Shane's decision on October 25, 2026, favoring question quality over volume. At an estimated 35–60¢ per hour-long episode, $30 covers roughly 50–85 episodes, about 2–3 weeks for 10 listeners at 3 episodes a week. |
 | Who reviews | The research collaborator reviews the technical design and code. TestFlight listeners review question quality and ease of use. The board or finance lead reviews the budget and limits, once. | Each reviewer looks at what they know best, at one checkpoint, so reviews don't slow every step. |
 | Pace | A short written design for the decisions that are expensive to change, then small steps that each end with something Shane can try. | Most of the research is done. The remaining questions are answered faster by testing than by writing. |
 | Abuse protection | No accounts. Apple App Attest proves a request comes from the real app; DeviceCheck lets limits survive reinstalling. | Keeps the app account-free while stopping scripts and reinstall loops from spending the nonprofit's money. |
@@ -52,7 +52,7 @@ Estimates assume someone familiar with the codebase. Each step after stage 0 end
 
 Write `docs/research/agora-mind-design.md`, two pages at most, covering only the decisions that are expensive to change later:
 
-1. **Spending controls.** The OpenRouter key's credit limit; Google Cloud budget alerts at 50, 90, and 100%; a per-device monthly allowance (proposed for testing: 20 episodes per device per month, with grading at the existing 60 answers a day, `DAILY_SCORE_LIMIT` in `Backend/src/config.ts`); and a pause switch that turns built-in AI off and points listeners to the own-account option.
+1. **Spending controls.** The OpenRouter key's credit limit; Google Cloud budget alerts at 50, 90, and 100%; a per-device allowance (proposed for testing: 4 episodes per device per week, with grading at the existing 60 answers a day, `DAILY_SCORE_LIMIT` in `Backend/src/config.ts`); and a pause switch that turns built-in AI off and points listeners to the own-account option.
 2. **Abuse protection.** Native App Attest, which keeps the app free of third-party packages, or Firebase App Check, which needs less server code but adds the Firebase SDK. Recommended: native. Use DeviceCheck's two per-device bits to mark a device that already used this month's allowance, so reinstalling doesn't reset it.
 3. **Where the allowance lives.** Reuse the anonymous device sessions (`POST /v1/auth/device`) and the `credit_ledger` table left from in-app purchases: grant each device a monthly allowance and charge one credit per new episode analysis.
 4. **Shared episode results.** When two listeners import the same public episode, reuse the first analysis instead of paying twice. Today's dedupe is per listener (`Backend/src/app.ts:277–287`). Public podcast content isn't personal data, but the privacy policy promises deletion of job records within 7 days, so this needs a policy decision.
@@ -64,7 +64,7 @@ Write `docs/research/agora-mind-design.md`, two pages at most, covering only the
 
 ### Step 1: Can a small model write good questions? (1–2 days)
 
-Handoff steps 2 and 4. Compare transcription with `openai/whisper-large-v3` and `qwen/qwen3-asr-1.7b`, and run the curation harness with Claude Haiku 5.5 and gpt-6-luna against gpt-5.6-terra, on three episodes Shane knows well.
+Handoff steps 2 and 4. The models are chosen (Claude Opus 5.5 for questions, Claude Haiku 5.5 for everything else); this step confirms they work. Compare transcription with `openai/whisper-large-v3` and `qwen/qwen3-asr-1.7b`, and run the curation harness with Opus 5.5 against gpt-5.6-terra, the previous default, on three episodes Shane knows well.
 
 **Try it:** read each model's questions for those episodes side by side.
 **Done when:** one transcription model and one question-writing model are chosen, with measured cost per episode, and recorded in a dated findings file.
@@ -130,11 +130,10 @@ When Shane says "merge it": open the pull request into `main`, remove the resear
 
 | Phase | Cap on the nonprofit's OpenRouter key |
 |---|---|
-| Steps 1–4 (Shane testing alone) | $25 in total |
-| Step 5 (listener round) | $100 |
-| After launch | Set at checkpoint D |
+| All testing and the listener round | $30 in total, the hard credit limit on the key |
+| After that | Set at checkpoint D; raising the limit needs Shane's approval |
 
-Google Cloud itself costs about $10–15 a month at this scale, mostly the database (see `gcp-small-scale-testing.md` section 7).
+Hosting has to fit in the remaining $30. Google Cloud costs about $10–15 a month at this scale, mostly the database (see `gcp-small-scale-testing.md` section 7), so it would last 2–3 months. A small relay on the website's existing Cloudflare Worker, proposed on October 25, would cost nothing extra at this size; it awaits Shane's decision. Whichever hosts the key must also stop requests once spending reaches the cap, using the cost OpenRouter reports with each response.
 
 ## Timeline (estimate)
 
