@@ -314,8 +314,7 @@ final class OpenRouterClient: @unchecked Sendable {
             """,
             schema: schema,
             maxTokens: min(16_000, 2_500 + candidateCount * 750),
-            reasoningEffort: "high",
-            timeoutInterval: 180
+            reasoningEffort: "high"
         )
     }
 
@@ -743,7 +742,7 @@ final class OpenRouterClient: @unchecked Sendable {
                 ["role": "system", "content": system],
                 ["role": "user", "content": user],
             ],
-            "max_tokens": maxTokens,
+            "max_tokens": maxTokens + reasoningAllowance(for: reasoningEffort),
             "response_format": [
                 "type": "json_schema",
                 "json_schema": ["name": name, "strict": true, "schema": schema],
@@ -769,6 +768,16 @@ final class OpenRouterClient: @unchecked Sendable {
             throw OpenRouterClientError.invalidResponse
         }
         return try jsonData(from: content)
+    }
+
+    // Reasoning tokens count against max_tokens, so callers pass only the visible JSON budget.
+    private func reasoningAllowance(for effort: String?) -> Int {
+        switch effort {
+        case "high": return 24_000
+        case "medium": return 8_000
+        case "low": return 2_000
+        default: return 0
+        }
     }
 
     private func messageText(from message: [String: Any]) -> String? {
