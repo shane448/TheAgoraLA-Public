@@ -44,20 +44,22 @@ When everyone agrees the work is done, merge through a pull request from `shane/
 2. **Direction: "Agora Lite" on Google Cloud.** Cloud Run service plus a Cloud Run job per episode, Cloud SQL Postgres, Secret Manager, models through OpenRouter (or Vertex AI). Full plan: `gcp-small-scale-testing.md`.
 3. **Transcription: prefer open-source models.** Qwen3-ASR-1.7B (Apache-2.0) is the most accurate open model and costs the same as Whisper large-v3 on OpenRouter ($0.0288/hour, `qwen/qwen3-asr-1.7b`).
 4. **Client: keep SwiftUI.** Move all pipeline logic to the server so any future client stays thin; retire the duplicate Swift pipeline.
+5. **Agora Mind: AI the nonprofit pays for** (Shane, October 25, 2026). The current app is renamed Agora Mind and uses a credit-limited OpenRouter key held only in Secret Manager, so listeners don't sign in to an AI. "Use your own OpenRouter account" stays as an advanced setting. Starting cap $100 a month on small models. Process: `agora-mind-design-process.md`.
 
 ## Decisions Shane needs to make
 
-1. **Project-paid AI for testing?** The repo forbids an Agora-owned AI key. A capped OpenRouter key kept in Secret Manager would let testers skip OpenRouter sign-up (~3–6¢ per episode). Otherwise testers keep using the app's OpenRouter sign-in.
-2. **Google Cloud project and billing account** for the Agora Lite sandbox.
-3. **Railway:** is the production service gone, renamed, or paused?
-4. **Shared transcript cache:** the privacy policy promises deletion of cloud job records within 7 days; caching transcripts across listeners needs a policy update.
-5. **Repo access** for the evaluator (`Jskidanov`) if this work should continue in the shared repo directly.
+1. **Google Cloud project and billing account** for the Agora Lite sandbox.
+2. **Railway:** is the production service gone, renamed, or paused?
+3. **Shared transcript cache:** the privacy policy promises deletion of cloud job records within 7 days; caching transcripts across listeners needs a policy update. Now part of Agora Mind stage 0.
+4. **Repo access** for the evaluator (`Jskidanov`) if this work should continue in the shared repo directly.
 
 ---
 
 ## Next steps (in order)
 
 Each step lists where to work and how to know it's done. Estimates assume someone familiar with the codebase.
+
+**Progress:** step 1's code fix is in commit `bb95c63` (reasoning headroom for every phone AI request; see `findings-2026-10-25.md` section 3). The live re-import of Ep. 40 is still to do. Steps 2–6 are now steps 1 and 2 of the [Agora Mind design process](agora-mind-design-process.md), which adds a design brief, spending limits, the app changes, and a listener round around them.
 
 | # | Step | Where | Done when | Estimate |
 |---|---|---|---|---|
@@ -87,4 +89,5 @@ Each step lists where to work and how to know it's done. Estimates assume someon
 | `HANDOFF.md` | This entry point: status, decisions, next steps |
 | `findings-2026-10-25.md` | All research notes: code review, simulator test, costs, transcription, media sources, MCP (dropped), on-device AI, platform advice, sources |
 | `gcp-small-scale-testing.md` | The Agora Lite plan: architecture, service-to-service flow, trade-offs, monthly cost, build plan, deployment sketch, price data |
+| `agora-mind-design-process.md` | How Agora Mind (AI the nonprofit pays for, no AI sign-in) gets designed and built: choices, reviewers, checkpoints, ordered steps |
 | `agora-scale-review-2026-10-25.html` | Designed scale-review page (open in a browser); its MCP sections are superseded |
